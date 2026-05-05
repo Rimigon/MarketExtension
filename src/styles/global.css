@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html, body {
+  background: #ffffff;
+}
+
+body {
+  @apply font-sans text-slate-900 bg-white antialiased;
+}
