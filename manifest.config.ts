@@ -50,6 +50,8 @@ export default defineManifest({
   host_permissions: [
     'https://*.ozon.ru/*',
     'https://*.wildberries.ru/*',
+    // WB exposes its catalog data via u-card.wb.ru / card.wb.ru — needed for the JSON API path.
+    'https://*.wb.ru/*',
     'https://market.yandex.ru/*',
   ],
   web_accessible_resources: [

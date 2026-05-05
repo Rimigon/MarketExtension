@@ -10,3 +10,19 @@ dist-types
 .vscode/*
 !.vscode/extensions.json
 coverage
+
+# Локальные машинные настройки skills-менеджера и общие skills,
+# не относящиеся к этому репо.
+.agents/
+skills-lock.json
+.claude/skills/accessibility/
+.claude/skills/composition-patterns/
+.claude/skills/frontend-design/
+.claude/skills/nodejs-backend-patterns/
+.claude/skills/nodejs-best-practices/
+.claude/skills/react-best-practices/
+.claude/skills/seo/
+.claude/skills/tailwind-css-patterns/
+.claude/skills/typescript-advanced-types/
+.claude/skills/vite/
+.claude/skills/vitest/

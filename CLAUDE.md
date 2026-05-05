@@ -7,7 +7,7 @@ Browser extension (Manifest V3) для отслеживания цен на Ozon
 
 - **Цель**: добавление товара в отслеживание прямо со страницы карточки + локальная история цен + аналитика и уведомления.
 - **Принцип**: local-first. IndexedDB через Dexie. Никакого бэкенда в MVP.
-- **MVP scope**: сначала Ozon end-to-end → потом Wildberries + Я.Маркет.
+- **MVP scope**: сначала Ozon end-to-end → потом Wildberries + Я.Маркет. Сейчас сделано: Ozon (DOM/JSON-LD парсер), Wildberries (через JSON-API `u-card.wb.ru`), Я.Маркет (DOM/JSON-LD).
 - **Локализация**: RU-only в MVP (i18n-структура заложена).
 - **Дистрибуция**: dev/unpacked. Web Store — после стабилизации.
 - **Стек**: Manifest V3 · TypeScript 5 (strict) · React 18 · Vite + @crxjs/vite-plugin · Dexie 4 · Zustand · Tailwind 3 · Recharts · Vitest.
@@ -32,15 +32,16 @@ content scripts (per site)  →  background service worker  →  Dexie / Indexed
 ```
 
 - **Parsers** (`src/parsers/<mp>/`) — чистые функции `(doc, url) → ParsedProduct | null`. Каскад источников: JSON-LD → SSR-state → DOM-селекторы → regex. Без сайд-эффектов.
+- **API-обогащение** (`src/parsers/<mp>/api.ts`, опционально) — асинхронный путь, обходящий DOM, когда у маркетплейса есть надёжный публичный JSON-эндпоинт (см. WB → `u-card.wb.ru`). Подключается через `RunOptions.enrich` в `runContentScript`.
 - **Repository** (`src/data/*.repo.ts`) — единственный путь к IndexedDB. UI напрямую в Dexie не лезет.
 - **Background** (`src/background/`) — оркестратор. Принимает RPC-сообщения, дёргает repos, эмитит события.
 - **UI** (`src/{popup,dashboard,options}`) — React-приложения. Общаются с background через `sendRpc<K>(...)` из `src/shared/rpc.ts`.
-- **Content scripts** (`src/content/`) — детектят страницу товара, парсят, инжектят кнопку `TrackButton` в Shadow DOM.
+- **Content scripts** (`src/content/<mp>.ts`) — тонкий бутстрап на `runContentScript()` из `src/content/run.ts`. Общая orchestration-логика (детект SPA, MutationObserver, инжект `TrackButton` через Shadow DOM, popup-bridge) живёт в `run.ts`. Каждый content-script-файл — 3 строки: импорт парсера + `runContentScript(parser, label, opts?)`.
 
 ## Слойные правила
 
 1. UI не импортирует Dexie напрямую. Только через RPC к background.
-2. Парсеры не делают сетевых запросов и не пишут в Dexie. Они чистые.
+2. Парсеры (`extract.ts`, `selectors.ts`) — чистые: никаких `fetch`/Dexie. Если нужен сетевой источник, кладём его в `<mp>/api.ts` и подключаем через `enrich` content-script'а — это сохраняет тестируемость парсера на HTML-фикстурах.
 3. `src/shared/types.ts` — единый источник правды по моделям. Все слои импортируют отсюда.
 4. Изменения в `src/data/db.ts` — это миграция. Поднимаем версию (`this.version(N).stores(...)`), не меняем существующую схему.
 5. Никаких `setInterval` в service worker. Только `chrome.alarms`.
@@ -66,8 +67,8 @@ content scripts (per site)  →  background service worker  →  Dexie / Indexed
 
 1. Создать `src/parsers/<mp>/{index.ts, extract.ts, selectors.ts}`. Реализовать `Parser` интерфейс.
 2. Зарегистрировать в `src/parsers/index.ts` (REGISTRY).
-3. Создать `src/content/<mp>.ts` (по аналогии с `ozon.ts`). Не забыть вызов `extractAnchorElement` + `injectTrackButton`.
-4. Добавить в `manifest.config.ts`: новый `content_scripts` matcher и `host_permissions`.
+3. Создать `src/content/<mp>.ts` — три строки: импорт парсера + вызов `runContentScript(parser, label, opts?)`. Якорь, MutationObserver, popup-bridge приходят из `src/content/run.ts`. Если у маркетплейса есть надёжный JSON-API — добавить `<mp>/api.ts` и передать `{ enrich: (url) => fetchFromApi(...) }` в `runContentScript` (см. `wildberries.ts` как пример).
+4. Добавить в `manifest.config.ts`: новый `content_scripts` matcher и `host_permissions` (если API-эндпоинт на отдельном поддомене — добавить и его).
 5. Добавить hosts в `src/shared/constants.ts → MARKETPLACE_HOSTS`.
 6. Положить 2–3 HTML-фикстуры в `tests/parsers/fixtures/<mp>/`.
 7. Написать `tests/parsers/<mp>.test.ts` по образцу `ozon.test.ts`.
@@ -75,8 +76,9 @@ content scripts (per site)  →  background service worker  →  Dexie / Indexed
 
 ## Парсеры: правила устойчивости
 
-- **Каскад источников**: JSON-LD → embedded state (`__NEXT_DATA__` и подобные) → DOM-селекторы → regex по тексту. Никогда не зависим от одного источника.
+- **Каскад источников**: публичный JSON-API (если есть) → JSON-LD → embedded state (`__NEXT_DATA__` и подобные) → DOM-селекторы → regex по тексту. Никогда не зависим от одного источника.
 - **Несколько селекторов на каждое поле** в `selectors.ts`. Когда что-то ломается — добавляем новый кандидат, не заменяем старый.
+- **Якорь для инжекта**: 2-3 целевых селектора + всегда `h1` как последний фолбэк. Маркетплейсы часто хешируют классы; h1 у карточки товара есть всегда.
 - **Не падаем на отсутствии полей** — собираем `missingFields[]` и пишем в `parserDiagnostics`. Возвращаем `parserStatus: 'partial'`. `'failed'` — только когда нет ни title, ни цены.
 - **При `parserStatus === 'failed'`** — не перезаписываем `currentPrice` существующего продукта (см. `productsRepo.updateFromParsed`).
 - **Фикстуры** в `tests/parsers/fixtures/<mp>/` обновляются при изменении вёрстки сайта. Каждый PR, ломающий парсер, должен сопровождаться обновлёнными фикстурами.
@@ -156,7 +158,9 @@ public/icons/    # PNG-иконки 16/32/48/128
 
 ## Когда что-то ломается
 
-- **Кнопка не появляется на странице**: открыть DevTools → Console — есть ли `[PriceWatch] ozon content script loaded`? Если нет — content script не загрузился (проверить `host_permissions`). Если есть — `[PriceWatch] Ozon: price anchor not found` означает, что селекторы устарели → обновить `OZON_SELECTORS.priceAnchor`.
-- **Service worker не отвечает**: chrome://extensions → «Inspect service worker». В MV3 SW засыпает; первый RPC после идла может быть медленным (это нормально).
-- **IndexedDB растёт**: посмотреть в DevTools → Application → IndexedDB → `pricewatch`. Старые `pricePoints` можно периодически прореживать (V1: TTL по политике).
-- **Парсер выдает `partial`**: посмотреть `parserDiagnostics` таблицу. `missingFields` укажет, какой селектор устарел.
+- **Кнопка не появляется на странице**: открыть DevTools → Console, фильтр `[PriceWatch:`. Должно быть `content script loaded`. Если нет — скрипт не загрузился (проверить `host_permissions` и matchers в `manifest.config.ts`). Если есть, но идёт `no anchor element found yet` — каждые 8 попыток в консоль выпадет `DOM probe (anchor missing)` со списком h1 и price-like элементов; по нему добавляем новые кандидаты в `<mp>/index.ts → findAnchor`.
+- **Popup-кнопка «Добавить» молчит**: ошибка должна показываться красным под кнопкой (`addError`). Если ошибка `Receiving end does not exist` — content script не подключён к вкладке (открыть до загрузки расширения). Просим F5 страницы.
+- **Service worker не отвечает / `Status code: 3`**: на Windows ошибка чаще всего из-за **non-ASCII пути** в директории расширения. Создать junction в ASCII-путь и грузить оттуда: `New-Item -ItemType Junction -Path C:\Users\<u>\pricewatch-dist -Target <full-path>\dist`. Помимо этого — chrome://extensions → «Inspect service worker». В MV3 SW засыпает; первый RPC после идла может быть медленным (норма).
+- **Service worker грузится с `localhost:5173`**: `dist/` в dev-режиме после `pnpm dev`. Перебилдить `pnpm build` для production-distrib.
+- **IndexedDB растёт**: DevTools → Application → IndexedDB → `pricewatch`. Старые `pricePoints` периодически прореживаем (V1: TTL по политике).
+- **Парсер выдает `partial`**: `parserDiagnostics` таблица. `missingFields` укажет, какой селектор устарел.

@@ -11,9 +11,16 @@ type TabState =
   | { kind: 'tracked'; product: Product; tabId: number; url: string }
   | { kind: 'untracked'; tabId: number; url: string };
 
+const ADD_ERROR_LABELS: Record<string, string> = {
+  not_product_page: 'Это не страница карточки товара.',
+  parser_failed: 'Не удалось распознать карточку (вёрстка изменилась или капча).',
+  no_price: 'Цена не найдена на странице — попробуйте обновить страницу.',
+};
+
 export function App() {
   const [tab, setTab] = useState<TabState>({ kind: 'loading' });
   const [recent, setRecent] = useState<Product[]>([]);
+  const [addError, setAddError] = useState<string | null>(null);
 
   useEffect(() => {
     void refresh();
@@ -46,11 +53,25 @@ export function App() {
   }
 
   async function askPageToAdd(tabId: number) {
+    setAddError(null);
     try {
-      await chrome.tabs.sendMessage(tabId, { type: 'pricewatch:requestAdd' });
+      const resp = (await chrome.tabs.sendMessage(tabId, {
+        type: 'pricewatch:requestAdd',
+      })) as { ok?: boolean; reason?: string } | undefined;
+      if (resp && resp.ok === false) {
+        const reason = resp.reason ?? 'unknown';
+        setAddError(ADD_ERROR_LABELS[reason] ?? `Не удалось добавить: ${reason}`);
+      }
       setTimeout(refresh, 300);
     } catch (err) {
-      console.error('[popup] askPageToAdd failed', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      // The most common case: "Could not establish connection. Receiving end does not exist."
+      // means the content script didn't load on this page (host_permissions or page navigation race).
+      setAddError(
+        /Receiving end/.test(msg)
+          ? 'Расширение не подключилось к странице. Обновите её (F5) и попробуйте снова.'
+          : msg,
+      );
     }
   }
 
@@ -92,12 +113,17 @@ export function App() {
         )}
 
         {tab.kind === 'untracked' && (
-          <button
-            className="w-full rounded-md bg-brand-500 px-3 py-2 text-sm font-medium text-white hover:bg-brand-600"
-            onClick={() => askPageToAdd(tab.tabId)}
-          >
-            Добавить текущий товар
-          </button>
+          <>
+            <button
+              className="w-full rounded-md bg-brand-500 px-3 py-2 text-sm font-medium text-white hover:bg-brand-600"
+              onClick={() => askPageToAdd(tab.tabId)}
+            >
+              Добавить текущий товар
+            </button>
+            {addError && (
+              <p className="mt-2 text-xs text-rose-600">{addError}</p>
+            )}
+          </>
         )}
 
         {tab.kind === 'tracked' && (
