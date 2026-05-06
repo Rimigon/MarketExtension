@@ -1,4 +1,12 @@
-import type { ParsedProduct, Product } from './types';
+import type {
+  AppNotification,
+  NotificationRule,
+  ParsedProduct,
+  PricePoint,
+  Product,
+  UserSettings,
+} from './types';
+import type { PriceHistoryAggregates } from '@/services/price-history';
 
 /**
  * Typed message bus between content scripts / popup / dashboard / options
@@ -16,6 +24,10 @@ export type RpcMap = {
     request: { canonicalUrl: string };
     response: { product: Product | null };
   };
+  'product/getById': {
+    request: { productId: string };
+    response: { product: Product | null };
+  };
   'product/list': {
     request: { limit?: number; archived?: boolean };
     response: { products: Product[] };
@@ -27,6 +39,46 @@ export type RpcMap = {
   'product/refresh': {
     request: { productId: string };
     response: { ok: boolean };
+  };
+  'priceHistory/get': {
+    request: { productId: string; since?: number };
+    response: { points: PricePoint[]; aggregates: PriceHistoryAggregates };
+  };
+  'notifications/list': {
+    request: { limit?: number; unreadOnly?: boolean };
+    response: { items: AppNotification[] };
+  };
+  'notifications/unreadCount': {
+    request: Record<string, never>;
+    response: { count: number };
+  };
+  'notifications/markRead': {
+    request: { id: string };
+    response: { ok: true };
+  };
+  'notifications/markAllRead': {
+    request: Record<string, never>;
+    response: { ok: true };
+  };
+  'notificationRules/list': {
+    request: Record<string, never>;
+    response: { rules: NotificationRule[] };
+  };
+  'notificationRules/upsert': {
+    request: { rule: Omit<NotificationRule, 'id'> & { id?: string } };
+    response: { rule: NotificationRule };
+  };
+  'notificationRules/remove': {
+    request: { id: string };
+    response: { ok: true };
+  };
+  'settings/get': {
+    request: Record<string, never>;
+    response: { settings: UserSettings };
+  };
+  'settings/update': {
+    request: { patch: Partial<Omit<UserSettings, 'id'>> };
+    response: { settings: UserSettings };
   };
   'ping': {
     request: Record<string, never>;

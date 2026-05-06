@@ -1,10 +1,32 @@
 import type { RpcEnvelope, RpcType } from '@/shared/rpc';
 import { handlers } from './handlers';
+import { notificationRulesRepo } from '@/data/notification-rules.repo';
+import { settingsRepo } from '@/data/settings.repo';
+import { refreshBadge, registerNotificationClick } from './notifier';
+import { startScheduler } from './scheduler';
 
 console.log('[PriceWatch] background service worker booted at', new Date().toISOString());
 
+void bootstrap();
+
+async function bootstrap(): Promise<void> {
+  try {
+    await notificationRulesRepo.seedDefaults();
+    await refreshBadge();
+    registerNotificationClick();
+    const settings = await settingsRepo.get();
+    if (settings.scheduledUpdates) {
+      await startScheduler();
+    }
+  } catch (err) {
+    console.warn('[PriceWatch] bootstrap failed', err);
+  }
+}
+
+
 chrome.runtime.onInstalled.addListener((details) => {
   console.log('[PriceWatch] onInstalled', details.reason);
+  void bootstrap();
 });
 
 chrome.runtime.onMessage.addListener(

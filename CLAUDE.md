@@ -34,7 +34,8 @@ content scripts (per site)  →  background service worker  →  Dexie / Indexed
 - **Parsers** (`src/parsers/<mp>/`) — чистые функции `(doc, url) → ParsedProduct | null`. Каскад источников: JSON-LD → SSR-state → DOM-селекторы → regex. Без сайд-эффектов.
 - **API-обогащение** (`src/parsers/<mp>/api.ts`, опционально) — асинхронный путь, обходящий DOM, когда у маркетплейса есть надёжный публичный JSON-эндпоинт (см. WB → `u-card.wb.ru`). Подключается через `RunOptions.enrich` в `runContentScript`.
 - **Repository** (`src/data/*.repo.ts`) — единственный путь к IndexedDB. UI напрямую в Dexie не лезет.
-- **Background** (`src/background/`) — оркестратор. Принимает RPC-сообщения, дёргает repos, эмитит события.
+- **Services** (`src/services/*.ts`) — чистая бизнес-логика поверх типов из `shared/types`: агрегаты, расчёты, форматтеры. Без Dexie, без DOM, без `chrome.*`. Тестируется без моков.
+- **Background** (`src/background/`) — оркестратор. Принимает RPC-сообщения, дёргает repos и services, эмитит события.
 - **UI** (`src/{popup,dashboard,options}`) — React-приложения. Общаются с background через `sendRpc<K>(...)` из `src/shared/rpc.ts`.
 - **Content scripts** (`src/content/<mp>.ts`) — тонкий бутстрап на `runContentScript()` из `src/content/run.ts`. Общая orchestration-логика (детект SPA, MutationObserver, инжект `TrackButton` через Shadow DOM, popup-bridge) живёт в `run.ts`. Каждый content-script-файл — 3 строки: импорт парсера + `runContentScript(parser, label, opts?)`.
 
@@ -83,21 +84,30 @@ content scripts (per site)  →  background service worker  →  Dexie / Indexed
 - **При `parserStatus === 'failed'`** — не перезаписываем `currentPrice` существующего продукта (см. `productsRepo.updateFromParsed`).
 - **Фикстуры** в `tests/parsers/fixtures/<mp>/` обновляются при изменении вёрстки сайта. Каждый PR, ломающий парсер, должен сопровождаться обновлёнными фикстурами.
 
-## Update scheduler (V1, ещё не реализовано)
+## Update scheduler
 
-Когда дойдём до этапа 5:
-- Один `chrome.alarms` каждые 5 минут пробуждает SW.
-- Очередь задач хранится в `chrome.storage.session` (восстановление после идла SW).
-- Rate limit: 1 тяжёлая задача / 8 секунд / marketplace.
-- Jitter: ±20%. Retry: exponential backoff `30s → 2m → 10m → 1h`, max 4 попытки.
-- Тяжёлые задачи (Ozon, Я.М.) — через `chrome.tabs.create({active:false, pinned:true})`. Лёгкие (WB) — через fetch.
+Реализовано в этапе 5 для лёгкого пути (WB через JSON-API). Tab-based путь для Ozon/Я.М. — V2.
 
-## Уведомления (V1, ещё не реализовано)
+- **Pure logic** (`src/services/scheduler.ts`) — `pickReady`, `computeBackoff`, `applyJitter`, `resolveTask`. Тестируется без моков.
+- **Driver** (`src/background/scheduler/index.ts`) — `startScheduler()` создаёт `chrome.alarms` `pricewatch:scheduler-tick` с периодом 5 мин. На каждый tick: `pickReady` → `dispatch` → `resolveTask` → save state.
+- **Queue** (`src/background/scheduler/queue.ts`) — хранится в `chrome.storage.session`. Очищается при перезапуске браузера; восстанавливается через `reconcileQueue()` из активных products.
+- **Executor** (`src/background/scheduler/executor.ts`) — `wildberries` → `fetchWbProductFromApi`; `ozon` / `yandex-market` возвращают `not_implemented:tab_refresh` (drop'аются после `MAX_ATTEMPTS`).
+- **Параметры**: rate limit `8с/marketplace`, max `5 задач/tick`, jitter ±20%, backoff `30с → 2м → 10м → 1ч`, MAX_ATTEMPTS=4.
+- **Hooks**: `applySettings()` дёргается из `settings/update` handler — включает/выключает scheduler динамически. `reconcileQueue()` — после `product/add`/`product/remove`.
+- **Settings UI** (`src/options/App.tsx`): `scheduledUpdates` toggle, `updateInterval` (15/30/60/180), `passiveUpdates`, `maxNotificationsPerHour`.
 
-- Cooldown по `(productId, ruleType)` = `max(rule.cooldown, settings.minCooldown)`.
-- Quiet hours → дайджест.
-- Дедуп по дню, лимит per hour.
-- Глобальные дефолты + per-product override. Глобальные совпадения матчатся ко всем не-исключённым товарам.
+## Уведомления
+
+Реализованы базовые правила (этап 4). Quiet hours / дайджесты / лимит per hour — V1, ещё не реализовано.
+
+- **NotificationService** (`src/services/notifications.ts`) — чистая функция `evaluate(product, transition, rules) → matches[]`. Триггеры: `priceBelow`, `dropPct`, `dropAbs`, `discountAppeared`, `backInStock`, `historicalLow`, `sellerChanged` (заглушка).
+- **Notifier** (`src/background/notifier.ts`) — оркестратор: применяет evaluate, проверяет cooldown по (productId, ruleId) через `notificationsRepo.lastFiredAt`, пишет AppNotification, дёргает `chrome.notifications.create` и обновляет badge через `chrome.action.setBadgeText`.
+- **Defaults** — при первом старте SW (`bootstrap()`) сидим три глобальных правила: drop ≥ 5% (cooldown 12ч), backInStock (24ч), historicalLow (24ч).
+- **Триггер** — вызывается из `product/add` handler после записи pricePoint. Транзишен включает `historyMinBefore` (минимум до текущего апдейта) для historicalLow.
+- **Глобальные vs per-product** — `notificationRulesRepo.listForProduct(id)` возвращает глобальные + правила scope=product этого id.
+- **Клик по chrome notification** — открывает dashboard в новой вкладке.
+
+V1 (когда дойдём): quiet hours → дайджест, лимит per hour, max-cooldown по `settings.minCooldown`, исключённые домены.
 
 ## Тестирование
 
@@ -141,6 +151,7 @@ content scripts (per site)  →  background service worker  →  Dexie / Indexed
 src/
   shared/        # типы, RPC, форматтеры, константы — общее для всех слоёв
   data/          # Dexie + repos
+  services/      # бизнес-логика (price-history.ts и т.п.) — pure, тестируется без моков
   parsers/       # один subfolder на marketplace + base.ts
   background/    # service worker + handlers
   content/       # per-site content scripts + Shadow DOM injector

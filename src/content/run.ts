@@ -31,6 +31,8 @@ export function runContentScript(parser: Parser, label: string, opts: RunOptions
   let lastDiag = '';
   let cachedEnrich: { canonicalUrl: string; product: ParsedProduct } | null = null;
   let enrichInFlight: Promise<ParsedProduct | null> | null = null;
+  let lastPassiveSync: { canonicalUrl: string; at: number } | null = null;
+  const PASSIVE_SYNC_COOLDOWN_MS = 30_000;
 
   function diag(msg: string, ...rest: unknown[]): void {
     // De-dupe noisy messages from the mutation-observer loop — log only when state changes.
@@ -150,6 +152,21 @@ export function runContentScript(parser: Parser, label: string, opts: RunOptions
       injectTrackButton({ anchor, parsed, initialProduct });
       currentAnchor = anchor;
       lastDiag = 'injected'; // reset dedup so re-checks log fresh state
+      // Passive sync: товар уже отслеживается → молча обновим product + запишем точку,
+      // если цена изменилась. Кулдаун 30с защищает от повторных вызовов на SPA-mutation.
+      if (initialProduct && parsed.parserStatus !== 'failed' && parsed.currentPrice != null) {
+        const now = Date.now();
+        const syncedRecently =
+          lastPassiveSync &&
+          lastPassiveSync.canonicalUrl === parsed.canonicalUrl &&
+          now - lastPassiveSync.at < PASSIVE_SYNC_COOLDOWN_MS;
+        if (!syncedRecently) {
+          lastPassiveSync = { canonicalUrl: parsed.canonicalUrl, at: now };
+          void sendRpc('product/add', { parsed, source: 'page' }).catch((err) =>
+            console.warn(prefix, 'passive sync failed', err),
+          );
+        }
+      }
     } finally {
       injecting = false;
     }
