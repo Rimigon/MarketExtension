@@ -1,6 +1,6 @@
 import { v7 as uuidv7 } from 'uuid';
 import { db } from './db';
-import type { AppNotification } from '@/shared/types';
+import type { AppNotification, NotificationDetails } from '@/shared/types';
 
 export const notificationsRepo = {
   async list(opts: { limit?: number; unreadOnly?: boolean } = {}): Promise<AppNotification[]> {
@@ -19,6 +19,7 @@ export const notificationsRepo = {
     ruleId: string;
     title: string;
     body: string;
+    details?: NotificationDetails;
   }): Promise<AppNotification> {
     const note: AppNotification = {
       id: uuidv7(),
@@ -27,9 +28,14 @@ export const notificationsRepo = {
       title: args.title,
       body: args.body,
       createdAt: Date.now(),
+      ...(args.details ? { details: args.details } : {}),
     };
     await db().notifications.put(note);
     return note;
+  },
+
+  async getById(id: string): Promise<AppNotification | undefined> {
+    return db().notifications.get(id);
   },
 
   async markRead(id: string): Promise<void> {

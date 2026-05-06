@@ -10,7 +10,7 @@ import { recommendation } from '@/services/recommendation';
 import { stats as statsService } from '@/services/stats';
 import { buildPayload, validatePayload } from '@/services/import-export';
 import type { ImportSummary } from '@/services/import-export';
-import { processProductUpdate, refreshBadge } from './notifier';
+import { processProductUpdate, refreshBadge, openDashboardAtNotifications } from './notifier';
 import {
   applySettings,
   getSchedulerStatus,
@@ -390,6 +390,11 @@ export const handlers: RpcHandlerMap = {
     const settings = await settingsRepo.update(patch);
     await applySettings();
     return { settings };
+  },
+
+  'dashboard/open': async ({ notificationId }) => {
+    await openDashboardAtNotifications(notificationId);
+    return { ok: true };
   },
 
   'scheduler/status': async () => getSchedulerStatus(),

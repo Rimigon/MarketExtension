@@ -9,6 +9,11 @@ import { startScheduler } from './scheduler';
 
 console.log('[PriceWatch] background service worker booted at', new Date().toISOString());
 
+// Register synchronously at module init so MV3 can wake the SW from a
+// notification click. Registering inside the async bootstrap() means the
+// listener is attached after the click event has already fired on a cold SW.
+registerNotificationClick();
+
 void bootstrap();
 
 async function bootstrap(): Promise<void> {
@@ -16,7 +21,6 @@ async function bootstrap(): Promise<void> {
     await notificationRulesRepo.seedDefaults();
     await collectionsRepo.ensureDefaults();
     await refreshBadge();
-    registerNotificationClick();
     const settings = await settingsRepo.get();
     setLocale(settings.locale);
     if (settings.scheduledUpdates) {

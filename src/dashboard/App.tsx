@@ -11,6 +11,7 @@ import {
 } from './components/ProductList';
 import { ProductDetail } from './components/ProductDetail';
 import { NotificationsList } from './components/NotificationsList';
+import { NotificationDetail } from './components/NotificationDetail';
 import { StatsPage } from './components/StatsPage';
 import { SettingsPage } from './components/SettingsPage';
 import { BulkRefreshToast, type BulkRefreshSummary } from './components/BulkRefreshToast';
@@ -26,11 +27,15 @@ export function App() {
     Record<string, { abs: number; pct: number; firstPrice: number; firstAt: number } | null>
   >({});
   const [loading, setLoading] = useState(true);
+  const initialHash = typeof window !== 'undefined' ? window.location.hash : '';
   const [scope, setScope] = useState<ScopeFilter>(() => {
-    if (typeof window !== 'undefined' && window.location.hash === '#settings') {
-      return { kind: 'settings' };
-    }
+    if (initialHash === '#settings') return { kind: 'settings' };
+    if (initialHash.startsWith('#notifications')) return { kind: 'notifications' };
     return { kind: 'all' };
+  });
+  const [selectedNotificationId, setSelectedNotificationId] = useState<string | null>(() => {
+    const m = initialHash.match(/^#notifications\/([^/?&]+)$/);
+    return m ? decodeURIComponent(m[1]) : null;
   });
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortKey>('updated');
@@ -73,6 +78,34 @@ export function App() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // When the dashboard opens (or is navigated) to a specific notification via
+  // hash, mark it read once the list is loaded.
+  useEffect(() => {
+    if (selectedNotificationId == null || loading) return;
+    const note = notifications.find((n) => n.id === selectedNotificationId);
+    if (!note || note.readAt != null) return;
+    void sendRpc('notifications/markRead', { id: note.id }).then(() => void load());
+  }, [selectedNotificationId, loading, notifications, load]);
+
+  // Listen for hash changes — chrome.tabs.update from a notification click can
+  // navigate the existing dashboard tab to a new hash. Re-route the UI when it does.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const apply = () => {
+      const h = window.location.hash;
+      if (h === '#settings') {
+        setScope({ kind: 'settings' });
+        setSelectedNotificationId(null);
+      } else if (h.startsWith('#notifications')) {
+        setScope({ kind: 'notifications' });
+        const m = h.match(/^#notifications\/([^/?&]+)$/);
+        setSelectedNotificationId(m ? decodeURIComponent(m[1]) : null);
+      }
+    };
+    window.addEventListener('hashchange', apply);
+    return () => window.removeEventListener('hashchange', apply);
+  }, []);
 
   // On mount: pull any scheduler summary that completed while dashboard was closed.
   useEffect(() => {
@@ -264,22 +297,41 @@ export function App() {
           <NotificationsList
             notifications={notifications}
             productsById={productsById}
-            selectedProductId={selectedId}
-            onSelectProduct={setSelectedId}
+            selectedNotificationId={selectedNotificationId}
+            onSelectNotification={(noteId, productId) => {
+              setSelectedNotificationId(noteId);
+              if (productId && productId !== '_global') setSelectedId(productId);
+            }}
             onChange={() => void load()}
           />
-          {selectedProduct ? (
-            <ProductDetail
-              product={selectedProduct}
-              collections={collections}
-              onRemove={() => handleRemove(selectedProduct.id)}
-              onChanged={() => void load()}
-            />
-          ) : (
-            <div className="flex h-full items-center justify-center px-8 text-center text-sm text-slate-500">
-              Выберите уведомление слева, чтобы открыть товар.
-            </div>
-          )}
+          {(() => {
+            const selectedNote =
+              selectedNotificationId != null
+                ? notifications.find((n) => n.id === selectedNotificationId) ?? null
+                : null;
+            if (selectedNote) {
+              const noteProduct =
+                selectedNote.productId !== '_global'
+                  ? productsById.get(selectedNote.productId) ?? null
+                  : null;
+              return (
+                <NotificationDetail
+                  notification={selectedNote}
+                  product={noteProduct}
+                  onOpenProduct={(id) => {
+                    setScope({ kind: 'all' });
+                    setSelectedId(id);
+                  }}
+                />
+              );
+            }
+            return (
+              <div className="flex h-full items-center justify-center px-8 text-center text-sm text-slate-500">
+                Выберите уведомление слева — справа откроется подробное описание:
+                что сработало, как изменилась цена и при ошибке — в чём проблема.
+              </div>
+            );
+          })()}
         </>
       ) : allProducts.length === 0 ? (
         <div className="col-span-2 flex items-center justify-center px-8 text-center text-sm text-slate-500">

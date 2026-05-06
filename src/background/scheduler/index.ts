@@ -34,6 +34,8 @@ interface ScheduledRefreshSummary {
   succeeded: number;
   failed: number;
   changes: { id: string; title: string; before: number; after: number }[];
+  /** Per-product failures with reason, surfaced in the notification detail panel. */
+  errors?: { productId: string; title: string; reason: string }[];
 }
 
 let runInFlight = false;
@@ -241,6 +243,7 @@ async function runBulkRefresh(): Promise<ScheduledRefreshSummary> {
     succeeded: 0,
     failed: 0,
     changes: [],
+    errors: [],
   };
   for (const p of products) {
     const before = p.currentPrice;
@@ -248,6 +251,7 @@ async function runBulkRefresh(): Promise<ScheduledRefreshSummary> {
       const result = await execute(p.marketplace, p.url, { allowHiddenTab: true });
       if (!result.ok) {
         summary.failed++;
+        summary.errors!.push({ productId: p.id, title: p.title, reason: result.error ?? 'unknown' });
         continue;
       }
       await persist(result.parsed);
@@ -258,6 +262,11 @@ async function runBulkRefresh(): Promise<ScheduledRefreshSummary> {
       }
     } catch (err) {
       summary.failed++;
+      summary.errors!.push({
+        productId: p.id,
+        title: p.title,
+        reason: err instanceof Error ? err.message : String(err),
+      });
       console.warn('[PriceWatch] bulk item failed', p.id, err);
     }
   }
@@ -305,6 +314,19 @@ async function notifyComplete(summary: ScheduledRefreshSummary): Promise<void> {
         ruleId: SCHEDULED_BULK_RULE_ID,
         title: 'Фоновая проверка',
         body: summaryMessage(summary),
+        details: {
+          kind: 'scheduledBulk',
+          total: summary.total,
+          succeeded: summary.succeeded,
+          failed: summary.failed,
+          changes: summary.changes,
+          errors: (summary.errors ?? []).map((e) => ({
+            productId: e.productId,
+            title: e.title,
+            status: 'failed',
+            missingFields: [e.reason],
+          })),
+        },
       });
       await refreshBadge();
     } catch (err) {
@@ -327,6 +349,7 @@ async function notifyComplete(summary: ScheduledRefreshSummary): Promise<void> {
           title: 'PriceWatch — фоновая проверка',
           message,
           priority: 1,
+          buttons: [{ title: 'Открыть' }],
         },
         () => {
           const err = chrome.runtime.lastError;

@@ -3,7 +3,7 @@ import { sendRpc } from '@/shared/rpc';
 import { canonicalizeUrl, detectMarketplace } from '@/shared/url';
 import { formatPrice, formatDateTime } from '@/shared/format';
 import { MARKETPLACE_LABELS } from '@/shared/constants';
-import type { Product } from '@/shared/types';
+import type { AppNotification, Product } from '@/shared/types';
 
 type TabState =
   | { kind: 'loading' }
@@ -20,6 +20,8 @@ const ADD_ERROR_LABELS: Record<string, string> = {
 export function App() {
   const [tab, setTab] = useState<TabState>({ kind: 'loading' });
   const [recent, setRecent] = useState<Product[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [addError, setAddError] = useState<string | null>(null);
   const [refreshingIds, setRefreshingIds] = useState<Set<string>>(() => new Set());
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
@@ -50,6 +52,12 @@ export function App() {
       }
       const { products } = await sendRpc('product/list', { limit: 5 });
       setRecent(products);
+      const [notes, unread] = await Promise.all([
+        sendRpc('notifications/list', { limit: 5 }),
+        sendRpc('notifications/unreadCount', {}),
+      ]);
+      setNotifications(notes.items);
+      setUnreadCount(unread.count);
     } catch (err) {
       console.warn('[popup] refresh failed', err);
     }
@@ -104,6 +112,22 @@ export function App() {
   function openDashboard() {
     const url = chrome.runtime.getURL('src/dashboard/index.html');
     chrome.tabs.create({ url });
+  }
+
+  async function openNotification(id?: string) {
+    try {
+      await sendRpc('dashboard/open', id ? { notificationId: id } : {});
+    } catch {
+      // Fallback if SW is asleep / RPC fails — open a fresh tab with the hash.
+      const base = chrome.runtime.getURL('src/dashboard/index.html');
+      chrome.tabs.create({ url: id ? `${base}#notifications/${id}` : `${base}#notifications` });
+    }
+    window.close();
+  }
+
+  async function markAllNotificationsRead() {
+    await sendRpc('notifications/markAllRead', {});
+    refresh();
   }
 
   async function refreshAll() {
@@ -224,6 +248,93 @@ export function App() {
           )}
         </div>
       )}
+
+      <section>
+        <div className="flex items-center justify-between">
+          <h2 className="text-xs font-semibold uppercase text-slate-500">
+            Уведомления
+            {unreadCount > 0 && (
+              <span className="ml-2 rounded-full bg-rose-600 px-1.5 py-0.5 text-[10px] font-medium leading-none text-white">
+                {unreadCount}
+              </span>
+            )}
+          </h2>
+          <div className="flex items-center gap-2 text-[11px]">
+            {unreadCount > 0 && (
+              <button
+                type="button"
+                onClick={() => void markAllNotificationsRead()}
+                className="text-brand-500 hover:underline"
+              >
+                Прочитать всё
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => void openNotification()}
+              className="text-slate-500 hover:underline"
+            >
+              Все →
+            </button>
+          </div>
+        </div>
+        {notifications.length === 0 ? (
+          <p className="mt-2 text-sm text-slate-500">Уведомлений пока нет.</p>
+        ) : (
+          <ul className="mt-2 space-y-1.5">
+            {notifications.slice(0, 3).map((n) => {
+              const unread = n.readAt == null;
+              const isGlobal = n.productId === '_global';
+              const product = !isGlobal ? recent.find((p) => p.id === n.productId) : undefined;
+              return (
+                <li key={n.id}>
+                  <button
+                    type="button"
+                    onClick={() => void openNotification(n.id)}
+                    className={`flex w-full items-start gap-2 rounded-md border p-2 text-left text-sm transition ${
+                      unread
+                        ? 'border-brand-200 bg-brand-50/50 hover:border-brand-300'
+                        : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    {isGlobal ? (
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-brand-50 text-brand-500">
+                        <PopupIcon name="refresh" />
+                      </div>
+                    ) : product?.imageUrl ? (
+                      <img
+                        src={product.imageUrl}
+                        alt=""
+                        className="h-8 w-8 shrink-0 rounded object-cover"
+                      />
+                    ) : (
+                      <div className="h-8 w-8 shrink-0 rounded bg-slate-100" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-baseline gap-1.5">
+                        <span
+                          className={`line-clamp-1 ${
+                            unread ? 'font-medium text-slate-900' : 'text-slate-700'
+                          }`}
+                        >
+                          {n.title}
+                        </span>
+                        {unread && (
+                          <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-rose-500" />
+                        )}
+                      </div>
+                      <div className="line-clamp-1 text-xs text-slate-500">{n.body}</div>
+                      <div className="mt-0.5 text-[10px] text-slate-400">
+                        {formatDateTime(n.createdAt)}
+                      </div>
+                    </div>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
 
       <section>
         <h2 className="text-xs font-semibold uppercase text-slate-500">Последние</h2>

@@ -5,16 +5,17 @@ import type { AppNotification, Product } from '@/shared/types';
 interface Props {
   notifications: AppNotification[];
   productsById: Map<string, Product>;
-  selectedProductId: string | null;
-  onSelectProduct: (productId: string) => void;
+  selectedNotificationId: string | null;
+  /** Called with (notificationId, productId). productId is '_global' for non-product notifications. */
+  onSelectNotification: (notificationId: string, productId: string) => void;
   onChange: () => void;
 }
 
 export function NotificationsList({
   notifications,
   productsById,
-  selectedProductId,
-  onSelectProduct,
+  selectedNotificationId,
+  onSelectNotification,
   onChange,
 }: Props) {
   async function markAll() {
@@ -64,19 +65,18 @@ export function NotificationsList({
               const product = productsById.get(n.productId);
               const unread = n.readAt == null;
               const isGlobal = n.productId === '_global';
+              const selected = selectedNotificationId === n.id;
               return (
                 <li
                   key={n.id}
                   className={`group relative grid grid-cols-[40px_1fr_auto] items-start gap-3 px-4 py-3 ${
-                    selectedProductId === n.productId ? 'bg-brand-50' : 'hover:bg-slate-50'
+                    selected ? 'bg-brand-50' : 'hover:bg-slate-50'
                   }`}
                 >
                   <button
                     type="button"
                     onClick={async () => {
-                      // Global (e.g. bulk-refresh summary) notifications don't
-                      // select a product — clicking just marks them as read.
-                      if (!isGlobal) onSelectProduct(n.productId);
+                      onSelectNotification(n.id, n.productId);
                       if (unread) {
                         await sendRpc('notifications/markRead', { id: n.id });
                         onChange();

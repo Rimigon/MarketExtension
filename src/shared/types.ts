@@ -106,6 +106,32 @@ export interface NotificationRule {
   cooldownMinutes: number;
 }
 
+export type NotificationDetails =
+  | {
+      kind: 'rule';
+      trigger: NotificationTrigger;
+      cooldownMinutes: number;
+      before: { price: number; availability: Availability; discountPct: number | null } | null;
+      after: { price: number; availability: Availability; discountPct: number | null };
+      historyMinBefore: number | null;
+      productSnapshot: {
+        title: string;
+        marketplace: Marketplace;
+        url: string;
+        imageUrl?: string;
+        parserStatus: ParserStatus;
+      };
+    }
+  | {
+      kind: 'scheduledBulk';
+      total: number;
+      succeeded: number;
+      failed: number;
+      changes: { id: string; title: string; before: number; after: number }[];
+      /** Per-product errors captured from parserDiagnostics around the run. */
+      errors?: { productId: string; title: string; status: ParserStatus; missingFields: string[] }[];
+    };
+
 export interface AppNotification {
   id: string;
   productId: string;
@@ -114,6 +140,8 @@ export interface AppNotification {
   body: string;
   createdAt: number;
   readAt?: number;
+  /** Optional structured context for the dashboard's detail panel. */
+  details?: NotificationDetails;
 }
 
 export interface Collection {

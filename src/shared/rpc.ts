@@ -188,6 +188,10 @@ export type RpcMap = {
       lastRunAt: number | null;
     };
   };
+  'dashboard/open': {
+    request: { notificationId?: string };
+    response: { ok: true };
+  };
   'ping': {
     request: Record<string, never>;
     response: { ok: true; ts: number };
