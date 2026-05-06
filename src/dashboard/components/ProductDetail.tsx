@@ -2,14 +2,17 @@ import { useEffect, useState } from 'react';
 import { sendRpc } from '@/shared/rpc';
 import { formatPrice, formatPercent, formatDateTime } from '@/shared/format';
 import { MARKETPLACE_LABELS } from '@/shared/constants';
-import type { PricePoint, PriceTier, Product } from '@/shared/types';
+import type { Collection, PricePoint, PriceTier, Product } from '@/shared/types';
 import type { PriceHistoryAggregates } from '@/services/price-history';
 import { PriceChart } from './PriceChart';
 import type { Range } from '@/services/price-history';
+import { ProductMeta } from './ProductMeta';
 
 interface Props {
   product: Product;
+  collections: Collection[];
   onRemove: () => void;
+  onChanged: () => void;
 }
 
 const EMPTY_AGGREGATES: PriceHistoryAggregates = {
@@ -27,11 +30,13 @@ const EMPTY_AGGREGATES: PriceHistoryAggregates = {
   maxAt: null,
 };
 
-export function ProductDetail({ product, onRemove }: Props) {
+export function ProductDetail({ product, collections, onRemove, onChanged }: Props) {
   const [points, setPoints] = useState<PricePoint[]>([]);
   const [aggregates, setAggregates] = useState<PriceHistoryAggregates>(EMPTY_AGGREGATES);
   const [range, setRange] = useState<Range>('30d');
   const [historyLoading, setHistoryLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshHint, setRefreshHint] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -88,6 +93,35 @@ export function ProductDetail({ product, onRemove }: Props) {
             Открыть карточку ↗
           </a>
           <button
+            type="button"
+            disabled={refreshing}
+            onClick={async () => {
+              setRefreshing(true);
+              setRefreshHint(null);
+              try {
+                const resp = await sendRpc('product/refresh', { productId: product.id });
+                if (resp.ok) {
+                  setRefreshHint('Цена обновлена');
+                  onChanged();
+                } else if (resp.reason === 'not_supported') {
+                  setRefreshHint('Откройте карточку в браузере — цена подтянется автоматически');
+                } else {
+                  setRefreshHint(`Не удалось обновить: ${resp.message ?? resp.reason}`);
+                }
+              } finally {
+                setRefreshing(false);
+              }
+            }}
+            className="text-xs text-brand-500 hover:underline disabled:opacity-50"
+          >
+            {refreshing ? 'Обновляю…' : 'Обновить цену'}
+          </button>
+          {refreshHint && (
+            <span className="max-w-[160px] text-right text-[10px] text-slate-500">
+              {refreshHint}
+            </span>
+          )}
+          <button
             onClick={onRemove}
             className="text-xs text-rose-600 hover:underline"
             type="button"
@@ -108,6 +142,8 @@ export function ProductDetail({ product, onRemove }: Props) {
         />
 
         <PriceTiersBlock tiers={product.priceTiers} fallback={product} />
+
+        <ProductMeta product={product} collections={collections} onChanged={onChanged} />
 
         <DetailsBlock product={product} />
 

@@ -1,12 +1,18 @@
 import type {
   AppNotification,
+  Collection,
   NotificationRule,
   ParsedProduct,
+  PriceGoal,
   PricePoint,
   Product,
+  ProductEvent,
   UserSettings,
 } from './types';
 import type { PriceHistoryAggregates } from '@/services/price-history';
+import type { Recommendation } from '@/services/recommendation';
+import type { StatsOverview } from '@/services/stats';
+import type { ExportPayload, ImportSummary } from '@/services/import-export';
 
 /**
  * Typed message bus between content scripts / popup / dashboard / options
@@ -38,11 +44,69 @@ export type RpcMap = {
   };
   'product/refresh': {
     request: { productId: string };
-    response: { ok: boolean };
+    response:
+      | { ok: true; product: Product }
+      | { ok: false; reason: 'not_supported' | 'no_product' | 'fetch_failed'; message?: string };
+  };
+  'product/setFavorite': {
+    request: { productId: string; favorite: boolean };
+    response: { ok: true };
+  };
+  'product/setArchived': {
+    request: { productId: string; archived: boolean };
+    response: { ok: true };
+  };
+  'product/setTags': {
+    request: { productId: string; tags: string[] };
+    response: { ok: true };
+  };
+  'product/setCollections': {
+    request: { productId: string; collectionIds: string[] };
+    response: { ok: true };
+  };
+  'product/setNotes': {
+    request: { productId: string; notes: string };
+    response: { ok: true };
+  };
+  'product/setGoal': {
+    request: { productId: string; goal: PriceGoal | null };
+    response: { ok: true };
+  };
+  'product/events': {
+    request: { productId: string };
+    response: { events: ProductEvent[] };
   };
   'priceHistory/get': {
     request: { productId: string; since?: number };
     response: { points: PricePoint[]; aggregates: PriceHistoryAggregates };
+  };
+  'recommendation/get': {
+    request: { productId: string };
+    response: { recommendation: Recommendation };
+  };
+  'collections/list': {
+    request: Record<string, never>;
+    response: { collections: Collection[] };
+  };
+  'collections/upsert': {
+    request: { collection: { id?: string; name: string; color?: string; sortOrder?: number } };
+    response: { collection: Collection };
+  };
+  'collections/remove': {
+    request: { id: string };
+    response: { ok: true };
+  };
+  'stats/overview': {
+    request: Record<string, never>;
+    response: { overview: StatsOverview };
+  };
+  'data/export': {
+    request: Record<string, never>;
+    response: { payload: ExportPayload };
+  };
+  'data/import': {
+    request: { payload: ExportPayload };
+    response: { summary: ImportSummary };
   };
   'notifications/list': {
     request: { limit?: number; unreadOnly?: boolean };

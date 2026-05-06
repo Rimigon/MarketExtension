@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { sendRpc } from '@/shared/rpc';
 import type { UserSettings } from '@/shared/types';
+import { validatePayload } from '@/services/import-export';
+import type { ImportSummary } from '@/services/import-export';
 
 const INTERVAL_OPTIONS: { value: UserSettings['updateInterval']; label: string }[] = [
   { value: 15, label: 'каждые 15 минут' },
@@ -104,6 +106,15 @@ export function App() {
         </div>
       </section>
 
+      <section className="mt-10">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+          Данные
+        </h2>
+        <div className="mt-4">
+          <DataImportExport />
+        </div>
+      </section>
+
       <footer className="mt-10 flex items-center justify-between border-t border-slate-200 pt-4 text-xs text-slate-500">
         <a href="../dashboard/index.html" className="text-brand-500 hover:underline">
           Открыть dashboard ↗
@@ -112,6 +123,110 @@ export function App() {
       </footer>
     </div>
   );
+}
+
+function DataImportExport() {
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
+
+  async function handleExport() {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const { payload } = await sendRpc('data/export', {});
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const stamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+      a.download = `pricewatch-export-${stamp}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setMessage({
+        tone: 'ok',
+        text: `Экспортировано: ${payload.products.length} товаров, ${payload.pricePoints.length} точек истории.`,
+      });
+    } catch (err) {
+      setMessage({ tone: 'error', text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleFile(file: File) {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const text = await file.text();
+      const raw = JSON.parse(text);
+      const payload = validatePayload(raw);
+      const { summary } = await sendRpc('data/import', { payload });
+      setMessage({ tone: 'ok', text: summarize(summary) });
+    } catch (err) {
+      setMessage({ tone: 'error', text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy(false);
+      if (fileInput.current) fileInput.current.value = '';
+    }
+  }
+
+  return (
+    <div className="rounded-md border border-slate-200 bg-white p-4">
+      <div className="text-sm font-medium text-slate-900">Резервная копия</div>
+      <p className="mt-0.5 text-xs text-slate-500">
+        Экспорт записывает товары, всю историю цен, события, коллекции и правила уведомлений в один JSON-файл.
+        Импорт добавляет недостающие записи; существующие товары не перезаписываются.
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => void handleExport()}
+          disabled={busy}
+          className="rounded-md bg-brand-500 px-3 py-1.5 text-sm text-white hover:bg-brand-600 disabled:opacity-50"
+        >
+          Экспорт JSON
+        </button>
+        <button
+          type="button"
+          onClick={() => fileInput.current?.click()}
+          disabled={busy}
+          className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 hover:border-slate-300 disabled:opacity-50"
+        >
+          Импорт JSON…
+        </button>
+        <input
+          ref={fileInput}
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void handleFile(file);
+          }}
+        />
+      </div>
+      {message && (
+        <p
+          className={`mt-3 text-xs ${
+            message.tone === 'ok' ? 'text-emerald-700' : 'text-rose-700'
+          }`}
+        >
+          {message.text}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function summarize(s: ImportSummary): string {
+  const parts: string[] = [];
+  parts.push(`Добавлено товаров: ${s.productsAdded}`);
+  if (s.productsSkipped > 0) parts.push(`пропущено как дубли: ${s.productsSkipped}`);
+  parts.push(`точек истории: ${s.pricePointsAdded}`);
+  if (s.collectionsAdded > 0) parts.push(`коллекций: ${s.collectionsAdded}`);
+  if (s.rulesAdded > 0) parts.push(`правил: ${s.rulesAdded}`);
+  return parts.join(', ') + '.';
 }
 
 function Toggle({

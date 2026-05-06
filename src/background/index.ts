@@ -1,7 +1,9 @@
 import type { RpcEnvelope, RpcType } from '@/shared/rpc';
 import { handlers } from './handlers';
 import { notificationRulesRepo } from '@/data/notification-rules.repo';
+import { collectionsRepo } from '@/data/collections.repo';
 import { settingsRepo } from '@/data/settings.repo';
+import { setLocale } from '@/shared/i18n';
 import { refreshBadge, registerNotificationClick } from './notifier';
 import { startScheduler } from './scheduler';
 
@@ -12,9 +14,11 @@ void bootstrap();
 async function bootstrap(): Promise<void> {
   try {
     await notificationRulesRepo.seedDefaults();
+    await collectionsRepo.ensureDefaults();
     await refreshBadge();
     registerNotificationClick();
     const settings = await settingsRepo.get();
+    setLocale(settings.locale);
     if (settings.scheduledUpdates) {
       await startScheduler();
     }

@@ -10,6 +10,9 @@ dist-types
 .vscode/*
 !.vscode/extensions.json
 coverage
+playwright-report
+test-results
+.playwright
 
 # Локальные машинные настройки skills-менеджера и общие skills,
 # не относящиеся к этому репо.

@@ -10,6 +10,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "pnpm build && playwright test",
+    "test:e2e:headed": "pnpm build && playwright test --headed",
     "typecheck": "tsc -b --noEmit",
     "lint": "eslint ."
   },
@@ -23,12 +25,13 @@
   },
   "devDependencies": {
     "@crxjs/vite-plugin": "^2.0.0-beta.28",
+    "@eslint/js": "^9.17.0",
+    "@playwright/test": "^1.59.1",
     "@types/chrome": "^0.0.287",
     "@types/node": "^22.10.2",
     "@types/react": "^18.3.17",
     "@types/react-dom": "^18.3.5",
     "@types/uuid": "^10.0.0",
-    "@eslint/js": "^9.17.0",
     "@typescript-eslint/eslint-plugin": "^8.18.1",
     "@typescript-eslint/parser": "^8.18.1",
     "@vitejs/plugin-react": "^4.3.4",

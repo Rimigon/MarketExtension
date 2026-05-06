@@ -1,6 +1,6 @@
 import { v7 as uuidv7 } from 'uuid';
 import { db } from './db';
-import type { ParsedProduct, Product } from '@/shared/types';
+import type { ParsedProduct, PriceGoal, Product } from '@/shared/types';
 
 export const productsRepo = {
   async getById(id: string): Promise<Product | undefined> {
@@ -98,5 +98,24 @@ export const productsRepo = {
 
   async setFavorite(productId: string, favorite: boolean): Promise<void> {
     await db().products.update(productId, { isFavorite: favorite });
+  },
+
+  async setTags(productId: string, tags: string[]): Promise<void> {
+    const cleaned = Array.from(new Set(tags.map((t) => t.trim()).filter(Boolean)));
+    await db().products.update(productId, { tags: cleaned });
+  },
+
+  async setCollections(productId: string, collectionIds: string[]): Promise<void> {
+    const cleaned = Array.from(new Set(collectionIds.filter(Boolean)));
+    await db().products.update(productId, { collectionIds: cleaned });
+  },
+
+  async setNotes(productId: string, notes: string): Promise<void> {
+    const trimmed = notes.trim();
+    await db().products.update(productId, { notes: trimmed.length === 0 ? undefined : notes });
+  },
+
+  async setGoal(productId: string, goal: PriceGoal | null): Promise<void> {
+    await db().products.update(productId, { goal: goal ?? undefined, updatedAt: Date.now() });
   },
 };

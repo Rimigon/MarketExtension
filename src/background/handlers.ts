@@ -4,11 +4,19 @@ import { pricesRepo } from '@/data/prices.repo';
 import { eventsRepo } from '@/data/events.repo';
 import { notificationsRepo } from '@/data/notifications.repo';
 import { notificationRulesRepo } from '@/data/notification-rules.repo';
+import { collectionsRepo } from '@/data/collections.repo';
 import { priceHistory } from '@/services/price-history';
+import { recommendation } from '@/services/recommendation';
+import { stats as statsService } from '@/services/stats';
+import { buildPayload, validatePayload } from '@/services/import-export';
+import type { ImportSummary } from '@/services/import-export';
 import { processProductUpdate, refreshBadge } from './notifier';
 import { applySettings, reconcileQueue } from './scheduler';
 import { updateQueue } from './scheduler/queue';
+import { execute as executeUpdate } from './scheduler/executor';
 import { settingsRepo } from '@/data/settings.repo';
+import { db } from '@/data/db';
+import type { PricePoint } from '@/shared/types';
 import type { PriceTransition } from '@/services/notifications';
 
 export const handlers: RpcHandlerMap = {
@@ -109,9 +117,188 @@ export const handlers: RpcHandlerMap = {
     return { ok: true };
   },
 
-  'product/refresh': async ({ productId: _productId }) => {
-    // Stage 5: scheduled / manual refresh through background tab.
-    return { ok: false };
+  'product/refresh': async ({ productId }) => {
+    const product = await productsRepo.getById(productId);
+    if (!product) return { ok: false, reason: 'no_product' };
+    if (product.marketplace !== 'wildberries') {
+      // Ozon / Yandex Market нужен tab-refresh — пока недоступен.
+      return { ok: false, reason: 'not_supported' };
+    }
+    const result = await executeUpdate(product.marketplace, product.url);
+    if (!result.ok) return { ok: false, reason: 'fetch_failed', message: result.error };
+
+    // Reuse the product/add path so price-point recording + notifications fire identically.
+    const persistResp = await handlers['product/add'](
+      { parsed: result.parsed, source: 'manual' },
+      {} as chrome.runtime.MessageSender,
+    );
+    if ('ok' in persistResp && persistResp.ok) {
+      return { ok: true, product: persistResp.product };
+    }
+    return { ok: false, reason: 'fetch_failed', message: 'persist_failed' };
+  },
+
+  'product/setFavorite': async ({ productId, favorite }) => {
+    await productsRepo.setFavorite(productId, favorite);
+    return { ok: true };
+  },
+
+  'product/setArchived': async ({ productId, archived }) => {
+    await productsRepo.setArchived(productId, archived);
+    await eventsRepo.record(productId, archived ? 'archived' : 'restored');
+    return { ok: true };
+  },
+
+  'product/setTags': async ({ productId, tags }) => {
+    await productsRepo.setTags(productId, tags);
+    return { ok: true };
+  },
+
+  'product/setCollections': async ({ productId, collectionIds }) => {
+    await productsRepo.setCollections(productId, collectionIds);
+    return { ok: true };
+  },
+
+  'product/setNotes': async ({ productId, notes }) => {
+    await productsRepo.setNotes(productId, notes);
+    return { ok: true };
+  },
+
+  'product/setGoal': async ({ productId, goal }) => {
+    await productsRepo.setGoal(productId, goal);
+    await eventsRepo.record(productId, 'targetUpdated', goal ? { ...goal } : { cleared: true });
+    return { ok: true };
+  },
+
+  'product/events': async ({ productId }) => {
+    const events = await eventsRepo.listForProduct(productId);
+    return { events };
+  },
+
+  'recommendation/get': async ({ productId }) => {
+    const product = await productsRepo.getById(productId);
+    const points = await pricesRepo.listForProduct(productId);
+    return { recommendation: recommendation.recommend(product?.currentPrice ?? null, points) };
+  },
+
+  'collections/list': async () => {
+    const collections = await collectionsRepo.list();
+    return { collections };
+  },
+
+  'collections/upsert': async ({ collection }) => {
+    const saved = await collectionsRepo.upsert(collection);
+    return { collection: saved };
+  },
+
+  'collections/remove': async ({ id }) => {
+    await collectionsRepo.remove(id);
+    return { ok: true };
+  },
+
+  'stats/overview': async () => {
+    const [active, archived, allPoints] = await Promise.all([
+      productsRepo.list({ archived: false }),
+      productsRepo.list({ archived: true }),
+      db().pricePoints.toArray(),
+    ]);
+    const pointsByProduct = new Map<string, PricePoint[]>();
+    for (const p of allPoints) {
+      const arr = pointsByProduct.get(p.productId);
+      if (arr) arr.push(p);
+      else pointsByProduct.set(p.productId, [p]);
+    }
+    const overview = statsService.computeOverview({ active, archived, pointsByProduct });
+    return { overview };
+  },
+
+  'data/export': async () => {
+    const [products, pricePoints, events, collections, notificationRules, notifications] = await Promise.all([
+      db().products.toArray(),
+      db().pricePoints.toArray(),
+      db().events.toArray(),
+      db().collections.toArray(),
+      db().notificationRules.toArray(),
+      db().notifications.toArray(),
+    ]);
+    const payload = buildPayload({
+      products,
+      pricePoints,
+      events,
+      collections,
+      notificationRules,
+      notifications,
+    });
+    return { payload };
+  },
+
+  'data/import': async ({ payload }) => {
+    const valid = validatePayload(payload);
+    const summary: ImportSummary = {
+      productsAdded: 0,
+      productsSkipped: 0,
+      pricePointsAdded: 0,
+      collectionsAdded: 0,
+      rulesAdded: 0,
+    };
+    await db().transaction(
+      'rw',
+      [
+        db().products,
+        db().pricePoints,
+        db().events,
+        db().collections,
+        db().notificationRules,
+      ],
+      async () => {
+        const existingProductIds = new Set((await db().products.toArray()).map((p) => p.id));
+        const existingCanonicals = new Set((await db().products.toArray()).map((p) => p.canonicalUrl));
+        const productsToAdd = valid.products.filter((p) => {
+          if (existingProductIds.has(p.id)) return false;
+          if (existingCanonicals.has(p.canonicalUrl)) {
+            summary.productsSkipped += 1;
+            return false;
+          }
+          return true;
+        });
+        if (productsToAdd.length > 0) {
+          await db().products.bulkPut(productsToAdd);
+          summary.productsAdded += productsToAdd.length;
+        }
+        const productIdAllow = new Set([...existingProductIds, ...productsToAdd.map((p) => p.id)]);
+
+        const ppExisting = new Set((await db().pricePoints.toArray()).map((p) => p.id));
+        const ppToAdd = valid.pricePoints.filter(
+          (p) => productIdAllow.has(p.productId) && !ppExisting.has(p.id),
+        );
+        if (ppToAdd.length > 0) {
+          await db().pricePoints.bulkPut(ppToAdd);
+          summary.pricePointsAdded = ppToAdd.length;
+        }
+
+        const evExisting = new Set((await db().events.toArray()).map((e) => e.id));
+        const evToAdd = valid.events.filter(
+          (e) => productIdAllow.has(e.productId) && !evExisting.has(e.id),
+        );
+        if (evToAdd.length > 0) await db().events.bulkPut(evToAdd);
+
+        const colExisting = new Set((await db().collections.toArray()).map((c) => c.id));
+        const colToAdd = valid.collections.filter((c) => !colExisting.has(c.id));
+        if (colToAdd.length > 0) {
+          await db().collections.bulkPut(colToAdd);
+          summary.collectionsAdded = colToAdd.length;
+        }
+
+        const ruleExisting = new Set((await db().notificationRules.toArray()).map((r) => r.id));
+        const rulesToAdd = valid.notificationRules.filter((r) => !ruleExisting.has(r.id));
+        if (rulesToAdd.length > 0) {
+          await db().notificationRules.bulkPut(rulesToAdd);
+          summary.rulesAdded = rulesToAdd.length;
+        }
+      },
+    );
+    void reconcileQueue().catch(() => undefined);
+    return { summary };
   },
 
   'notifications/list': async ({ limit, unreadOnly }) => {
