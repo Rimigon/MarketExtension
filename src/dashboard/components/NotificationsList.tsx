@@ -22,19 +22,35 @@ export function NotificationsList({
     onChange();
   }
 
+  async function removeOne(id: string) {
+    await sendRpc('notifications/remove', { id });
+    onChange();
+  }
+
+  async function removeAll() {
+    if (!confirm(`Удалить все уведомления (${notifications.length})?`)) return;
+    await sendRpc('notifications/removeAll', {});
+    onChange();
+  }
+
+  const hasUnread = notifications.some((n) => n.readAt == null);
+
   return (
     <div className="flex h-full flex-col border-r border-slate-200">
-      <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+      <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
         <h2 className="text-sm font-semibold text-slate-700">Уведомления</h2>
-        {notifications.some((n) => n.readAt == null) && (
-          <button
-            type="button"
-            onClick={markAll}
-            className="text-xs text-brand-500 hover:underline"
-          >
-            Прочитать всё
-          </button>
-        )}
+        <div className="flex items-center gap-3 text-xs">
+          {hasUnread && (
+            <button type="button" onClick={markAll} className="text-brand-500 hover:underline">
+              Прочитать всё
+            </button>
+          )}
+          {notifications.length > 0 && (
+            <button type="button" onClick={removeAll} className="text-rose-600 hover:underline">
+              Удалить всё
+            </button>
+          )}
+        </div>
       </div>
       <div className="flex-1 overflow-y-auto">
         {notifications.length === 0 ? (
@@ -47,22 +63,37 @@ export function NotificationsList({
             {notifications.map((n) => {
               const product = productsById.get(n.productId);
               const unread = n.readAt == null;
+              const isGlobal = n.productId === '_global';
               return (
-                <li key={n.id}>
+                <li
+                  key={n.id}
+                  className={`group relative grid grid-cols-[40px_1fr_auto] items-start gap-3 px-4 py-3 ${
+                    selectedProductId === n.productId ? 'bg-brand-50' : 'hover:bg-slate-50'
+                  }`}
+                >
                   <button
                     type="button"
                     onClick={async () => {
-                      onSelectProduct(n.productId);
+                      // Global (e.g. bulk-refresh summary) notifications don't
+                      // select a product — clicking just marks them as read.
+                      if (!isGlobal) onSelectProduct(n.productId);
                       if (unread) {
                         await sendRpc('notifications/markRead', { id: n.id });
                         onChange();
                       }
                     }}
-                    className={`grid w-full grid-cols-[40px_1fr] items-start gap-3 px-4 py-3 text-left ${
-                      selectedProductId === n.productId ? 'bg-brand-50' : 'hover:bg-slate-50'
-                    }`}
+                    className="contents text-left"
                   >
-                    {product?.imageUrl ? (
+                    {isGlobal ? (
+                      <div className="flex h-10 w-10 items-center justify-center rounded bg-brand-50 text-brand-500">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+                          <path d="M21 3v5h-5" />
+                          <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+                          <path d="M3 21v-5h5" />
+                        </svg>
+                      </div>
+                    ) : product?.imageUrl ? (
                       <img src={product.imageUrl} alt="" className="h-10 w-10 rounded object-cover" />
                     ) : (
                       <div className="h-10 w-10 rounded bg-slate-100" />
@@ -85,6 +116,30 @@ export function NotificationsList({
                         {formatDateTime(n.createdAt)}
                       </div>
                     </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void removeOne(n.id);
+                    }}
+                    title="Удалить уведомление"
+                    className="flex h-7 w-7 items-center justify-center rounded text-slate-300 hover:bg-rose-50 hover:text-rose-600"
+                  >
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
                   </button>
                 </li>
               );

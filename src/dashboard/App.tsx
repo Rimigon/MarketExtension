@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { sendRpc } from '@/shared/rpc';
-import type { AppNotification, Collection, Marketplace, Product } from '@/shared/types';
+import type { AppNotification, Collection, Marketplace, Product, UserSettings } from '@/shared/types';
 import { MARKETPLACES } from '@/shared/constants';
 import { Sidebar, type ScopeFilter } from './components/Sidebar';
 import {
@@ -13,6 +13,8 @@ import { ProductDetail } from './components/ProductDetail';
 import { NotificationsList } from './components/NotificationsList';
 import { StatsPage } from './components/StatsPage';
 import { SettingsPage } from './components/SettingsPage';
+import { BulkRefreshToast, type BulkRefreshSummary } from './components/BulkRefreshToast';
+export type { BulkRefreshSummary } from './components/BulkRefreshToast';
 
 export function App() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -37,16 +39,26 @@ export function App() {
   const [selectedMarketplaces, setSelectedMarketplaces] = useState<Set<Marketplace>>(
     () => new Set(MARKETPLACES),
   );
+  const [refreshingIds, setRefreshingIds] = useState<Set<string>>(() => new Set());
+  const [bulkRefreshProgress, setBulkRefreshProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
+  const [bulkSummary, setBulkSummary] = useState<BulkRefreshSummary | null>(null);
+  const [settings, setSettings] = useState<UserSettings | null>(null);
+  const [schedulerBump, setSchedulerBump] = useState(0);
+  const bumpScheduler = useCallback(() => setSchedulerBump((v) => v + 1), []);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [active, archived, notes, unread, cols, tr] = await Promise.all([
+    const [active, archived, notes, unread, cols, tr, st] = await Promise.all([
       sendRpc('product/list', { archived: false }),
       sendRpc('product/list', { archived: true }),
       sendRpc('notifications/list', { limit: 200 }),
       sendRpc('notifications/unreadCount', {}),
       sendRpc('collections/list', {}),
       sendRpc('priceTrends/list', {}),
+      sendRpc('settings/get', {}),
     ]);
     setProducts(active.products);
     setArchivedProducts(archived.products);
@@ -54,6 +66,7 @@ export function App() {
     setUnreadCount(unread.count);
     setCollections(cols.collections);
     setTrends(tr.trends);
+    setSettings(st.settings);
     setLoading(false);
   }, []);
 
@@ -61,10 +74,103 @@ export function App() {
     void load();
   }, [load]);
 
+  // On mount: pull any scheduler summary that completed while dashboard was closed.
+  useEffect(() => {
+    let cancelled = false;
+    void sendRpc('scheduler/lastSummary', {}).then((resp) => {
+      if (cancelled) return;
+      if (resp.summary) setBulkSummary(resp.summary);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Listen for the scheduler-completed broadcast from the background SW.
+  // Surface the same toast we use for manual «Обновить все», and refresh data.
+  useEffect(() => {
+    const listener = (msg: unknown) => {
+      if (
+        !msg ||
+        typeof msg !== 'object' ||
+        (msg as { type?: string }).type !== 'pricewatch:scheduledRefreshDone'
+      ) {
+        return;
+      }
+      const summary = (msg as { summary?: BulkRefreshSummary }).summary;
+      if (summary) setBulkSummary(summary);
+      void load();
+      bumpScheduler();
+    };
+    chrome.runtime.onMessage.addListener(listener);
+    return () => chrome.runtime.onMessage.removeListener(listener);
+  }, [load]);
+
   async function handleRemove(id: string) {
     await sendRpc('product/remove', { productId: id });
     if (selectedId === id) setSelectedId(null);
     void load();
+  }
+
+  async function handleRefreshProduct(id: string) {
+    setRefreshingIds((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+    try {
+      await sendRpc('product/refresh', { productId: id });
+    } finally {
+      setRefreshingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      void load();
+      bumpScheduler();
+    }
+  }
+
+  async function handleRefreshAll() {
+    // Refresh whatever is currently visible (matches the user's filters/scope).
+    // The background's single-flight queue serializes calls, so even though we
+    // could fire them in parallel, a sequential await gives accurate progress.
+    const targets = visibleProducts.map((p) => ({
+      id: p.id,
+      title: p.title,
+      before: p.currentPrice,
+    }));
+    if (targets.length === 0) return;
+    setBulkRefreshProgress({ done: 0, total: targets.length });
+    setBulkSummary(null);
+    const changes: BulkRefreshSummary['changes'] = [];
+    let succeeded = 0;
+    let failed = 0;
+    try {
+      for (let i = 0; i < targets.length; i++) {
+        const t = targets[i]!;
+        try {
+          const resp = await sendRpc('product/refresh', { productId: t.id });
+          if ('ok' in resp && resp.ok) {
+            succeeded++;
+            const after = resp.product.currentPrice;
+            if (t.before != null && after != null && after !== t.before) {
+              changes.push({ id: t.id, title: t.title, before: t.before, after });
+            }
+          } else {
+            failed++;
+          }
+        } catch {
+          failed++;
+        }
+        setBulkRefreshProgress({ done: i + 1, total: targets.length });
+      }
+    } finally {
+      setBulkRefreshProgress(null);
+      setBulkSummary({ total: targets.length, succeeded, failed, changes });
+      void load();
+      bumpScheduler();
+    }
   }
 
   const allProducts = useMemo(
@@ -119,6 +225,7 @@ export function App() {
 
   return (
     <div className="grid h-screen grid-cols-[240px_360px_1fr] bg-slate-50">
+      <BulkRefreshToast summary={bulkSummary} onClose={() => setBulkSummary(null)} />
       <Sidebar
         scope={scope}
         onScopeChange={(s) => {
@@ -131,6 +238,7 @@ export function App() {
         unreadNotifications={unreadCount}
         collections={collections}
         onCollectionsChange={() => void load()}
+        schedulerBump={schedulerBump}
       />
 
       {loading ? (
@@ -145,7 +253,12 @@ export function App() {
           }}
         />
       ) : scope.kind === 'settings' ? (
-        <SettingsPage />
+        <SettingsPage
+          onSettingsSaved={() => {
+            void load();
+            bumpScheduler();
+          }}
+        />
       ) : scope.kind === 'notifications' ? (
         <>
           <NotificationsList
@@ -186,6 +299,12 @@ export function App() {
             onSortChange={setSort}
             filters={filters}
             onFiltersChange={setFilters}
+            refreshingIds={refreshingIds}
+            onRefreshProduct={handleRefreshProduct}
+            onRefreshAll={handleRefreshAll}
+            bulkRefreshProgress={bulkRefreshProgress}
+            onRemoveProduct={handleRemove}
+            marketplaceColorCoding={settings?.marketplaceColorCoding ?? true}
           />
           {selectedProduct ? (
             <ProductDetail

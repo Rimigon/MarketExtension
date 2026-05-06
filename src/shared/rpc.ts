@@ -131,6 +131,14 @@ export type RpcMap = {
     request: Record<string, never>;
     response: { ok: true };
   };
+  'notifications/remove': {
+    request: { id: string };
+    response: { ok: true };
+  };
+  'notifications/removeAll': {
+    request: Record<string, never>;
+    response: { ok: true; removed: number };
+  };
   'notificationRules/list': {
     request: Record<string, never>;
     response: { rules: NotificationRule[] };
@@ -150,6 +158,35 @@ export type RpcMap = {
   'settings/update': {
     request: { patch: Partial<Omit<UserSettings, 'id'>> };
     response: { settings: UserSettings };
+  };
+  'scheduler/lastSummary': {
+    request: Record<string, never>;
+    response: {
+      summary:
+        | {
+            total: number;
+            succeeded: number;
+            failed: number;
+            changes: { id: string; title: string; before: number; after: number }[];
+          }
+        | null;
+      at: number | null;
+    };
+  };
+  'scheduler/status': {
+    request: Record<string, never>;
+    response: {
+      enabled: boolean;
+      /** When the next bulk refresh fires (epoch ms). Null when disabled / not yet armed. */
+      nextRunAt: number | null;
+      /** Number of active products that will be refreshed on the next tick. */
+      queueSize: number;
+      mode: 'interval' | 'daily';
+      intervalMinutes: number;
+      dailyAtHour: number | null;
+      /** When the last bulk refresh completed. Null if it has never run. */
+      lastRunAt: number | null;
+    };
   };
   'ping': {
     request: Record<string, never>;

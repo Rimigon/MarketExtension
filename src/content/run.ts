@@ -12,6 +12,13 @@ export interface RunOptions {
    * Result is cached by canonical URL to avoid re-fetching on every mutation tick.
    */
   enrich?: (url: URL) => Promise<ParsedProduct | null>;
+  /**
+   * When true, skip in-page button injection and the MutationObserver loop.
+   * Content script still answers popup-bridge (`pricewatch:requestAdd`) and
+   * hidden-refresh (`pricewatch:probe`) messages. Used for marketplaces where
+   * the on-page button is unreliable (e.g. Ozon — heavy SPA + hashed classes).
+   */
+  noInject?: boolean;
 }
 
 /**
@@ -22,6 +29,22 @@ export interface RunOptions {
 export function runContentScript(parser: Parser, label: string, opts: RunOptions = {}): void {
   const prefix = `[PriceWatch:${label}]`;
   console.info(`${prefix} content script loaded`, location.href);
+
+  // Hidden refresh: background opened this tab to read the price without UI.
+  // Skip the inject loop / passive sync entirely; just answer probe messages.
+  if (location.hash === '#__pwHidden') {
+    console.info(`${prefix} hidden mode — probe-only`);
+    registerProbeHandler(parser, opts, prefix);
+    return;
+  }
+
+  // No-inject mode: don't paint a button on the page (popup-only marketplaces).
+  // We still register message handlers so popup "Add" and hidden-refresh keep working.
+  if (opts.noInject) {
+    console.info(`${prefix} inject disabled — message handlers only`);
+    registerNoInjectHandlers(parser, opts, prefix);
+    return;
+  }
 
   let observer: MutationObserver | null = null;
   let injecting = false;
@@ -260,14 +283,17 @@ export function runContentScript(parser: Parser, label: string, opts: RunOptions
 
   chrome.runtime.onMessage.addListener(
     (message: unknown, _sender, sendResponse: (resp?: unknown) => void) => {
-      if (
-        !message ||
-        typeof message !== 'object' ||
-        !('type' in message) ||
-        (message as { type: string }).type !== 'pricewatch:requestAdd'
-      ) {
+      if (!message || typeof message !== 'object' || !('type' in message)) {
         return undefined;
       }
+      const type = (message as { type: string }).type;
+
+      if (type === 'pricewatch:probe') {
+        void probeOnce(parser, opts).then((result) => sendResponse(result));
+        return true;
+      }
+
+      if (type !== 'pricewatch:requestAdd') return undefined;
 
       // Try clicking the existing injected button first (preserves onChange semantics).
       const host = getHost();
@@ -286,4 +312,96 @@ export function runContentScript(parser: Parser, label: string, opts: RunOptions
       return true; // keep the channel open for async sendResponse
     },
   );
+}
+
+/**
+ * No-inject mode: marketplace doesn't get a TrackButton on the page,
+ * but popup-add and hidden-refresh keep working. Used for Ozon where
+ * the in-page anchor is unreliable across A/B variants.
+ */
+function registerNoInjectHandlers(parser: Parser, opts: RunOptions, prefix: string): void {
+  chrome.runtime.onMessage.addListener(
+    (message: unknown, _sender, sendResponse: (resp?: unknown) => void) => {
+      if (!message || typeof message !== 'object' || !('type' in message)) return undefined;
+      const type = (message as { type: string }).type;
+
+      if (type === 'pricewatch:probe') {
+        void probeOnce(parser, opts).then((result) => {
+          if (!result.ok) console.info(prefix, 'probe not ready', result.reason);
+          sendResponse(result);
+        });
+        return true;
+      }
+
+      if (type === 'pricewatch:requestAdd') {
+        void probeOnce(parser, opts).then(async (probe) => {
+          if (!probe.ok) {
+            sendResponse({ ok: false, reason: probe.reason, via: 'direct' });
+            return;
+          }
+          try {
+            const resp = await sendRpc('product/add', { parsed: probe.parsed, source: 'popup' });
+            if (!resp.ok) sendResponse({ ok: false, reason: resp.error, via: 'direct' });
+            else sendResponse({ ok: true, via: 'direct' });
+          } catch (err) {
+            sendResponse({
+              ok: false,
+              reason: err instanceof Error ? err.message : String(err),
+              via: 'direct',
+            });
+          }
+        });
+        return true;
+      }
+
+      return undefined;
+    },
+  );
+}
+
+/**
+ * Probe-only handler used in hidden-tab refresh mode.
+ * Background opens the URL with `#__pwHidden`, content script answers
+ * `pricewatch:probe` with the current parsed product (or a `not_ready`
+ * reason — the background will retry until it becomes ready or times out).
+ */
+function registerProbeHandler(parser: Parser, opts: RunOptions, prefix: string): void {
+  chrome.runtime.onMessage.addListener(
+    (message: unknown, _sender, sendResponse: (resp?: unknown) => void) => {
+      if (
+        !message ||
+        typeof message !== 'object' ||
+        !('type' in message) ||
+        (message as { type: string }).type !== 'pricewatch:probe'
+      ) {
+        return undefined;
+      }
+      void probeOnce(parser, opts).then((result) => {
+        if (!result.ok) console.info(prefix, 'probe not ready', result.reason);
+        sendResponse(result);
+      });
+      return true;
+    },
+  );
+}
+
+async function probeOnce(
+  parser: Parser,
+  opts: RunOptions,
+): Promise<{ ok: true; parsed: ParsedProduct } | { ok: false; reason: string }> {
+  const url = new URL(location.href);
+  if (!parser.isProductPage(url)) return { ok: false, reason: 'not_product_page' };
+  let parsed: ParsedProduct | null = null;
+  try {
+    if (opts.enrich) {
+      parsed = await opts.enrich(url);
+    }
+  } catch {
+    parsed = null;
+  }
+  if (!parsed) parsed = parser.parse(document, url);
+  if (!parsed) return { ok: false, reason: 'parser_failed' };
+  if (parsed.parserStatus === 'failed') return { ok: false, reason: 'parser_status_failed' };
+  if (parsed.currentPrice == null) return { ok: false, reason: 'no_price' };
+  return { ok: true, parsed };
 }

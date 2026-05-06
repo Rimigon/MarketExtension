@@ -117,7 +117,13 @@ describe('scheduler.resolveTask', () => {
   };
 
   it('on success, resets attempts and reschedules to now+interval (with jitter)', () => {
-    const out = resolveTask(baseTask, { kind: 'success' }, 60_000, 100_000, () => 0.5);
+    const out = resolveTask(
+      baseTask,
+      { kind: 'success' },
+      { intervalMs: 60_000 },
+      100_000,
+      () => 0.5,
+    );
     expect(out).not.toBeNull();
     expect(out!.attempts).toBe(0);
     expect(out!.lastError).toBeUndefined();
@@ -129,7 +135,7 @@ describe('scheduler.resolveTask', () => {
     const out = resolveTask(
       { ...baseTask, attempts: 0 },
       { kind: 'failure', error: 'http_500' },
-      60_000,
+      { intervalMs: 60_000 },
       100_000,
       () => 0.5,
     );
@@ -143,9 +149,24 @@ describe('scheduler.resolveTask', () => {
     const out = resolveTask(
       { ...baseTask, attempts: MAX_ATTEMPTS },
       { kind: 'failure', error: 'boom' },
-      60_000,
+      { intervalMs: 60_000 },
       100_000,
     );
     expect(out).toBeNull();
+  });
+
+  it('daily mode: schedules next run at the configured local hour', () => {
+    // 2024-06-01 14:30 local time
+    const now = new Date(2024, 5, 1, 14, 30, 0).getTime();
+    const out = resolveTask(
+      baseTask,
+      { kind: 'success' },
+      { intervalMs: 60_000, dailyAtHour: 9 },
+      now,
+    );
+    expect(out).not.toBeNull();
+    // 14:30 → 09:00 already passed today, so schedule tomorrow 09:00
+    const expected = new Date(2024, 5, 2, 9, 0, 0).getTime();
+    expect(out!.nextRunAt).toBe(expected);
   });
 });

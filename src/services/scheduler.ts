@@ -89,6 +89,35 @@ export interface FailureResult {
 
 export type ExecResult = SuccessResult | FailureResult;
 
+export interface NextRunOptions {
+  /** Used when `dailyAtHour` is null — interval mode. */
+  intervalMs: number;
+  /**
+   * If set (0–23), schedule the next run at that local hour on the next day
+   * after `now`. Overrides `intervalMs`.
+   */
+  dailyAtHour?: number | null;
+}
+
+/**
+ * Compute when a successful task should run next. In interval mode we add a
+ * jittered interval; in daily-time mode we align to the next occurrence of
+ * the chosen local hour (no jitter — the user picked an exact time).
+ */
+export function computeNextRunAfterSuccess(
+  now: number,
+  opts: NextRunOptions,
+  random = Math.random,
+): number {
+  if (opts.dailyAtHour != null && opts.dailyAtHour >= 0 && opts.dailyAtHour <= 23) {
+    const d = new Date(now);
+    d.setHours(opts.dailyAtHour, 0, 0, 0);
+    if (d.getTime() <= now) d.setDate(d.getDate() + 1);
+    return d.getTime();
+  }
+  return now + applyJitter(opts.intervalMs, 0.2, random);
+}
+
 /**
  * After a task completes (success or failure), produce the updated task. Returns
  * null when the task should be dropped from the queue (max attempts reached).
@@ -96,7 +125,7 @@ export type ExecResult = SuccessResult | FailureResult;
 export function resolveTask(
   task: UpdateTask,
   result: ExecResult,
-  intervalMs: number,
+  next: NextRunOptions,
   now: number,
   random = Math.random,
 ): UpdateTask | null {
@@ -106,7 +135,7 @@ export function resolveTask(
       attempts: 0,
       lastError: undefined,
       lastAttemptedAt: now,
-      nextRunAt: now + applyJitter(intervalMs, 0.2, random),
+      nextRunAt: computeNextRunAfterSuccess(now, next, random),
     };
   }
   const nextAttempt = task.attempts + 1;

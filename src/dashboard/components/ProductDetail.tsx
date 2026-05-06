@@ -147,6 +147,17 @@ export function ProductDetail({ product, collections, onRemove, onChanged }: Pro
       </header>
 
       <div className="flex-1 space-y-5 px-6 py-5">
+        <DetailsBlock product={product} />
+
+        {product.description && (
+          <section className="rounded-lg border border-slate-200 bg-white p-4">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Описание
+            </h3>
+            <p className="mt-2 whitespace-pre-line text-sm text-slate-700">{product.description}</p>
+          </section>
+        )}
+
         <StatsGrid aggregates={aggregates} loading={historyLoading} />
 
         <PriceChart
@@ -159,17 +170,6 @@ export function ProductDetail({ product, collections, onRemove, onChanged }: Pro
         <PriceTiersBlock tiers={product.priceTiers} fallback={product} />
 
         <ProductMeta product={product} collections={collections} onChanged={onChanged} />
-
-        <DetailsBlock product={product} />
-
-        {product.description && (
-          <section className="rounded-lg border border-slate-200 bg-white p-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Описание
-            </h3>
-            <p className="mt-2 whitespace-pre-line text-sm text-slate-700">{product.description}</p>
-          </section>
-        )}
 
         {product.specs && product.specs.length > 0 && (
           <section className="rounded-lg border border-slate-200 bg-white p-4">

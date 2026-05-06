@@ -5,13 +5,23 @@ import { validatePayload } from '@/services/import-export';
 import type { ImportSummary } from '@/services/import-export';
 
 const INTERVAL_OPTIONS: { value: UserSettings['updateInterval']; label: string }[] = [
-  { value: 15, label: 'каждые 15 минут' },
-  { value: 30, label: 'каждые 30 минут' },
+  { value: 15, label: '15 мин' },
+  { value: 30, label: '30 мин' },
   { value: 60, label: 'раз в час' },
   { value: 180, label: 'раз в 3 часа' },
+  { value: 360, label: 'раз в 6 часов' },
+  { value: 720, label: 'раз в 12 часов' },
+  { value: 1440, label: 'раз в сутки' },
 ];
 
-export function SettingsPage() {
+const HOURS = Array.from({ length: 24 }, (_, i) => i);
+
+interface Props {
+  /** Notified after every successful patch — used to refresh dependent UI (e.g. sidebar timer). */
+  onSettingsSaved?: () => void;
+}
+
+export function SettingsPage({ onSettingsSaved }: Props = {}) {
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
@@ -25,6 +35,7 @@ export function SettingsPage() {
     const resp = await sendRpc('settings/update', { patch });
     setSettings(resp.settings);
     setSavedAt(Date.now());
+    onSettingsSaved?.();
   }
 
   if (!settings) {
@@ -60,7 +71,7 @@ export function SettingsPage() {
 
             <Toggle
               label="Фоновое обновление"
-              description="Запускает периодический пересчёт цен в фоне. Сейчас работает для Wildberries (через JSON-API). Для Ozon и Я.Маркета фон будет включён в следующем релизе — пока такие товары обновляются только при заходе."
+              description="Запускает периодический пересчёт цен в фоне для всех маркетплейсов (Ozon и Я.Маркет — через тихую закреплённую вкладку, Wildberries — через JSON-API)."
               checked={settings.scheduledUpdates}
               onChange={(v) => void patch({ scheduledUpdates: v })}
             />
@@ -70,28 +81,94 @@ export function SettingsPage() {
                 settings.scheduledUpdates ? 'border-slate-200 bg-white' : 'border-slate-100 bg-slate-50/50 opacity-60'
               }`}
             >
-              <div className="text-sm font-medium text-slate-900">Частота фонового обновления</div>
-              <p className="mt-0.5 text-xs text-slate-500">
-                Слишком частые проверки могут перегрузить маркетплейс. Реальная частота немного варьируется (±20% jitter), чтобы запросы шли неравномерно.
-              </p>
-              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                {INTERVAL_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    disabled={!settings.scheduledUpdates}
-                    onClick={() => void patch({ updateInterval: opt.value })}
-                    className={`rounded-md border px-3 py-2 text-sm transition ${
-                      settings.updateInterval === opt.value
-                        ? 'border-brand-500 bg-brand-50 text-brand-700'
-                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
-                    } ${!settings.scheduledUpdates ? 'cursor-not-allowed' : ''}`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
+              <div className="text-sm font-medium text-slate-900">Режим расписания</div>
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  disabled={!settings.scheduledUpdates}
+                  onClick={() => void patch({ dailyAtHour: null })}
+                  className={`flex-1 rounded-md border px-3 py-2 text-sm transition ${
+                    settings.dailyAtHour == null
+                      ? 'border-brand-500 bg-brand-50 text-brand-700'
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                  } ${!settings.scheduledUpdates ? 'cursor-not-allowed' : ''}`}
+                >
+                  По интервалу
+                </button>
+                <button
+                  type="button"
+                  disabled={!settings.scheduledUpdates}
+                  onClick={() => void patch({ dailyAtHour: settings.dailyAtHour ?? 9 })}
+                  className={`flex-1 rounded-md border px-3 py-2 text-sm transition ${
+                    settings.dailyAtHour != null
+                      ? 'border-brand-500 bg-brand-50 text-brand-700'
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                  } ${!settings.scheduledUpdates ? 'cursor-not-allowed' : ''}`}
+                >
+                  Раз в сутки в…
+                </button>
               </div>
+
+              {settings.dailyAtHour == null ? (
+                <>
+                  <p className="mt-3 text-xs text-slate-500">
+                    Слишком частые проверки могут перегрузить маркетплейс. Реальная частота варьируется ±20% (jitter), чтобы запросы шли неравномерно.
+                  </p>
+                  <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    {INTERVAL_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        disabled={!settings.scheduledUpdates}
+                        onClick={() => void patch({ updateInterval: opt.value })}
+                        className={`rounded-md border px-3 py-2 text-sm transition ${
+                          settings.updateInterval === opt.value
+                            ? 'border-brand-500 bg-brand-50 text-brand-700'
+                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                        } ${!settings.scheduledUpdates ? 'cursor-not-allowed' : ''}`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="mt-3 text-xs text-slate-500">
+                    Цены обновятся один раз в сутки в выбранное локальное время.
+                  </p>
+                  <div className="mt-3 flex items-center gap-2">
+                    <label className="text-sm text-slate-700">Время:</label>
+                    <select
+                      disabled={!settings.scheduledUpdates}
+                      value={settings.dailyAtHour}
+                      onChange={(e) => void patch({ dailyAtHour: Number(e.target.value) })}
+                      className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-sm focus:border-brand-500 focus:outline-none disabled:cursor-not-allowed"
+                    >
+                      {HOURS.map((h) => (
+                        <option key={h} value={h}>
+                          {String(h).padStart(2, '0')}:00
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              )}
             </div>
+          </div>
+        </section>
+
+        <section className="mt-10">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+            Внешний вид
+          </h2>
+          <div className="mt-4 space-y-4">
+            <Toggle
+              label="Цветные метки маркетплейсов"
+              description="Показывать цветную полосу слева у каждого товара и подсвеченную плашку маркетплейса в подписи (Ozon — синий, Wildberries — розовый, Я.Маркет — жёлтый)."
+              checked={settings.marketplaceColorCoding}
+              onChange={(v) => void patch({ marketplaceColorCoding: v })}
+            />
           </div>
         </section>
 

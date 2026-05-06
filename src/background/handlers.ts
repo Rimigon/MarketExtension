@@ -11,7 +11,12 @@ import { stats as statsService } from '@/services/stats';
 import { buildPayload, validatePayload } from '@/services/import-export';
 import type { ImportSummary } from '@/services/import-export';
 import { processProductUpdate, refreshBadge } from './notifier';
-import { applySettings, reconcileQueue } from './scheduler';
+import {
+  applySettings,
+  getSchedulerStatus,
+  reconcileQueue,
+  takePendingSummary,
+} from './scheduler';
 import { updateQueue } from './scheduler/queue';
 import { execute as executeUpdate } from './scheduler/executor';
 import { settingsRepo } from '@/data/settings.repo';
@@ -148,11 +153,8 @@ export const handlers: RpcHandlerMap = {
   'product/refresh': async ({ productId }) => {
     const product = await productsRepo.getById(productId);
     if (!product) return { ok: false, reason: 'no_product' };
-    if (product.marketplace !== 'wildberries') {
-      // Ozon / Yandex Market нужен tab-refresh — пока недоступен.
-      return { ok: false, reason: 'not_supported' };
-    }
-    const result = await executeUpdate(product.marketplace, product.url);
+    // WB → JSON-API; Ozon / Yandex Market → hidden inactive tab + on-demand probe.
+    const result = await executeUpdate(product.marketplace, product.url, { allowHiddenTab: true });
     if (!result.ok) return { ok: false, reason: 'fetch_failed', message: result.error };
 
     // Reuse the product/add path so price-point recording + notifications fire identically.
@@ -351,6 +353,19 @@ export const handlers: RpcHandlerMap = {
     return { ok: true };
   },
 
+  'notifications/remove': async ({ id }) => {
+    await notificationsRepo.remove(id);
+    await refreshBadge();
+    return { ok: true };
+  },
+
+  'notifications/removeAll': async () => {
+    const before = (await notificationsRepo.list({})).length;
+    await notificationsRepo.removeAll();
+    await refreshBadge();
+    return { ok: true, removed: before };
+  },
+
   'notificationRules/list': async () => {
     const rules = await notificationRulesRepo.list();
     return { rules };
@@ -376,4 +391,8 @@ export const handlers: RpcHandlerMap = {
     await applySettings();
     return { settings };
   },
+
+  'scheduler/status': async () => getSchedulerStatus(),
+
+  'scheduler/lastSummary': async () => takePendingSummary(),
 };

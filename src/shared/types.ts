@@ -124,9 +124,17 @@ export interface Collection {
   sortOrder: number;
 }
 
+/** Update interval in minutes. 1440 = once a day. */
+export type UpdateIntervalMinutes = 15 | 30 | 60 | 180 | 360 | 720 | 1440;
+
 export interface UserSettings {
   id: 'singleton';
-  updateInterval: 15 | 30 | 60 | 180;
+  updateInterval: UpdateIntervalMinutes;
+  /**
+   * If set, scheduled updates run once a day at this hour (0–23) regardless
+   * of `updateInterval`. Local time. Null = use interval mode.
+   */
+  dailyAtHour: number | null;
   passiveUpdates: boolean;
   scheduledUpdates: boolean;
   quietHours?: { from: string; to: string };
@@ -134,6 +142,8 @@ export interface UserSettings {
   theme: 'light' | 'dark' | 'auto';
   excludedDomains: string[];
   locale: 'ru' | 'en';
+  /** Show a colored stripe per marketplace in product lists. */
+  marketplaceColorCoding: boolean;
 }
 
 /**

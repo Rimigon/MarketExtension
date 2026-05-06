@@ -43,6 +43,14 @@ export const notificationsRepo = {
     await db().notifications.bulkPut(unread.map((n) => ({ ...n, readAt: now })));
   },
 
+  async remove(id: string): Promise<void> {
+    await db().notifications.delete(id);
+  },
+
+  async removeAll(): Promise<void> {
+    await db().notifications.clear();
+  },
+
   async lastFiredAt(productId: string, ruleId: string): Promise<number | null> {
     const matches = await db()
       .notifications.where('productId')

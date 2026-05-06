@@ -24,6 +24,19 @@ export function isOzonProductPage(url: URL): boolean {
   return PRODUCT_PATH_RE.test(url.pathname.replace(/\/+$/, '/'));
 }
 
+/**
+ * Ozon CDN URLs encode the rendered width as `/c<NN>/` (e.g. `c100`, `c200`,
+ * `wc500`). Gallery thumbnails are typically requested at small sizes, which
+ * looks blurry in our dashboard. Rewrite to `c1000` — Ozon supports this size
+ * for all multimedia paths, and the file is the same image, just a larger
+ * pre-rendered variant. Non-Ozon URLs are returned unchanged.
+ */
+export function upgradeOzonImageUrl(url: string): string {
+  if (!url) return url;
+  if (!/ozone\.ru|ozonru\./i.test(url)) return url;
+  return url.replace(/\/(wc|cs|c)\d+\//i, (_, prefix: string) => `/${prefix}1000/`);
+}
+
 function firstMatch<T extends Element>(doc: ParentNode, selectors: readonly string[]): T | null {
   for (const sel of selectors) {
     const found = doc.querySelector<T>(sel);
@@ -317,8 +330,10 @@ function fromJsonLd(doc: Document): Partial<ParsedProduct> | null {
     result.brand = product.brand.name;
   }
 
-  if (typeof product.image === 'string') result.imageUrl = product.image;
-  else if (Array.isArray(product.image) && product.image.length > 0) result.imageUrl = product.image[0];
+  if (typeof product.image === 'string') result.imageUrl = upgradeOzonImageUrl(product.image);
+  else if (Array.isArray(product.image) && product.image.length > 0) {
+    result.imageUrl = upgradeOzonImageUrl(product.image[0]!);
+  }
 
   if (product.sku != null) result.sku = String(product.sku);
 
@@ -395,7 +410,7 @@ function fromDom(doc: Document): Partial<ParsedProduct> {
   }
 
   const imageEl = firstMatch<HTMLImageElement>(doc, OZON_SELECTORS.image);
-  if (imageEl?.src) result.imageUrl = imageEl.src;
+  if (imageEl?.src) result.imageUrl = upgradeOzonImageUrl(imageEl.src);
 
   const ratingEl = firstMatch<HTMLElement>(doc, OZON_SELECTORS.rating);
   if (ratingEl) {

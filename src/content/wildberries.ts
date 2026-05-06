@@ -43,8 +43,32 @@ function readWalletPriceFromDom(): number | null {
   return null;
 }
 
-function augmentWithWalletPrice(parsed: ParsedProduct): ParsedProduct {
-  const wallet = readWalletPriceFromDom();
+/**
+ * In hidden-tab refresh mode the page may not have rendered the wallet price
+ * element yet by the time we probe. Poll the DOM for up to `timeoutMs`,
+ * returning as soon as a wallet price appears (typically <2s after navigation).
+ * Returns null if it never shows up — e.g. the user is signed out, the
+ * product has no wallet discount, or this isn't a hidden tab and the SPA
+ * stripped the element.
+ */
+async function waitForWalletPriceFromDom(timeoutMs: number): Promise<number | null> {
+  const start = Date.now();
+  let interval = 200;
+  while (Date.now() - start < timeoutMs) {
+    const wallet = readWalletPriceFromDom();
+    if (wallet != null) return wallet;
+    await new Promise((r) => setTimeout(r, interval));
+    interval = Math.min(interval + 100, 600);
+  }
+  return null;
+}
+
+async function augmentWithWalletPrice(
+  parsed: ParsedProduct,
+  waitForDomMs = 0,
+): Promise<ParsedProduct> {
+  const wallet =
+    waitForDomMs > 0 ? await waitForWalletPriceFromDom(waitForDomMs) : readWalletPriceFromDom();
   if (wallet == null) return parsed;
   // No improvement to make if the wallet figure is the same/higher than what the API gave us.
   if (parsed.currentPrice != null && wallet >= parsed.currentPrice) return parsed;
@@ -77,12 +101,19 @@ function augmentWithWalletPrice(parsed: ParsedProduct): ParsedProduct {
   };
 }
 
+// In hidden-tab refresh mode the page just navigated, the wallet price element
+// may take a couple of seconds to render. Wait for it. In normal page-mode the
+// content script already waits via MutationObserver before calling enrich, so
+// the wallet element is present and the read returns synchronously fast.
+const isHiddenTab = location.hash === '#__pwHidden';
+const WALLET_DOM_WAIT_MS = isHiddenTab ? 8000 : 0;
+
 runContentScript(wildberriesParser, 'wildberries', {
   enrich: async (url) => {
     const nm = extractNmFromUrl(url);
     if (nm == null) return null;
     const parsed = await fetchWbProductFromApi(nm, url);
     if (!parsed) return null;
-    return augmentWithWalletPrice(parsed);
+    return augmentWithWalletPrice(parsed, WALLET_DOM_WAIT_MS);
   },
 });

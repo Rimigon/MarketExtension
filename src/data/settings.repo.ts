@@ -5,7 +5,11 @@ import type { UserSettings } from '@/shared/types';
 export const settingsRepo = {
   async get(): Promise<UserSettings> {
     const row = await db().settings.get('singleton');
-    if (row) return row;
+    if (row) {
+      // Merge defaults so newly added fields (e.g. dailyAtHour) are present
+      // for users with pre-existing settings rows.
+      return { ...DEFAULT_SETTINGS, ...row };
+    }
     await db().settings.put(DEFAULT_SETTINGS);
     return DEFAULT_SETTINGS;
   },

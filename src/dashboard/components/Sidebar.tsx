@@ -1,8 +1,18 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { sendRpc } from '@/shared/rpc';
 import type { Collection, Marketplace, Product } from '@/shared/types';
 import { MARKETPLACE_LABELS, MARKETPLACES } from '@/shared/constants';
 import { t } from '@/shared/i18n';
+
+interface SchedulerStatus {
+  enabled: boolean;
+  nextRunAt: number | null;
+  queueSize: number;
+  mode: 'interval' | 'daily';
+  intervalMinutes: number;
+  dailyAtHour: number | null;
+  lastRunAt: number | null;
+}
 
 export type ScopeFilter =
   | { kind: 'all' }
@@ -22,6 +32,8 @@ interface Props {
   unreadNotifications: number;
   collections: Collection[];
   onCollectionsChange: () => void;
+  /** Increments after each refresh — Sidebar re-polls scheduler/status when it changes. */
+  schedulerBump: number;
 }
 
 export function Sidebar({
@@ -33,9 +45,59 @@ export function Sidebar({
   unreadNotifications,
   collections,
   onCollectionsChange,
+  schedulerBump,
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [newName, setNewName] = useState('');
+  const [schedulerStatus, setSchedulerStatus] = useState<SchedulerStatus | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const status = await sendRpc('scheduler/status', {});
+        if (!cancelled) {
+          setSchedulerStatus(status);
+          setNow(Date.now());
+        }
+      } catch {
+        // SW asleep or RPC unavailable — keep last value
+      }
+    };
+    void refresh();
+    // Tick the clock and re-poll status every minute. The clock decides
+    // "вот-вот / через N мин"; the poll catches when scheduler advances
+    // nextRunAt after a successful tick.
+    const tick = setInterval(() => setNow(Date.now()), 60_000);
+    const poll = setInterval(() => void refresh(), 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(tick);
+      clearInterval(poll);
+    };
+  }, []);
+
+  // Re-poll immediately when the parent signals a refresh just happened —
+  // nextRunAt advances after each successful task, this keeps the hint live.
+  useEffect(() => {
+    if (schedulerBump === 0) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const status = await sendRpc('scheduler/status', {});
+        if (!cancelled) {
+          setSchedulerStatus(status);
+          setNow(Date.now());
+        }
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [schedulerBump]);
 
   const counts = {
     all: products.filter((p) => !p.isArchived).length,
@@ -218,8 +280,126 @@ export function Sidebar({
           );
         })}
       </ul>
+
+      {schedulerStatus?.enabled && (
+        <div className="mt-auto pt-6">
+          <SchedulerHint
+            status={schedulerStatus}
+            now={now}
+            onRefreshTimer={() => setNow(Date.now())}
+          />
+        </div>
+      )}
     </aside>
   );
+}
+
+function SchedulerHint({
+  status,
+  now,
+  onRefreshTimer,
+}: {
+  status: SchedulerStatus;
+  now: number;
+  onRefreshTimer: () => void;
+}) {
+  const next = status.nextRunAt;
+  const modeLine =
+    status.mode === 'daily'
+      ? `Раз в сутки в ${String(status.dailyAtHour ?? 0).padStart(2, '0')}:00`
+      : `Каждые ${formatInterval(status.intervalMinutes)}`;
+
+  if (next == null) {
+    return (
+      <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+        <div className="font-medium text-slate-900">{modeLine}</div>
+        <div className="mt-0.5 text-slate-500">Ожидаем первую проверку…</div>
+      </div>
+    );
+  }
+  const inMs = next - now;
+  // Once `nextRunAt` has passed, the alarm tick (1 min period) will dispatch
+  // shortly. Show "≤1 мин" instead of stale "вот-вот…" for clarity.
+  const inLabel =
+    inMs <= 0 ? '≤ 1 мин' : `~${formatRelative(inMs)}`;
+
+  return (
+    <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+      <div className="flex items-center justify-between">
+        <div className="font-medium text-slate-900">{modeLine}</div>
+        <button
+          type="button"
+          onClick={onRefreshTimer}
+          title="Обновить таймер"
+          className="flex h-5 w-5 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+            <path d="M21 3v5h-5" />
+            <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+            <path d="M3 21v-5h5" />
+          </svg>
+        </button>
+      </div>
+      <div className="mt-0.5 text-slate-500">
+        Через {inLabel}
+        <span className="text-slate-400"> · {formatTime(next)}</span>
+      </div>
+      {status.queueSize > 0 && (
+        <div className="text-[11px] text-slate-400">
+          {status.queueSize} {pluralProducts(status.queueSize)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function pluralProducts(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return 'товар';
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return 'товара';
+  return 'товаров';
+}
+
+function formatInterval(min: number): string {
+  if (min < 60) return `${min} мин`;
+  if (min === 60) return 'час';
+  const h = Math.round(min / 60);
+  if (h < 24) return `${h} ч`;
+  return `${Math.round(h / 24)} сут`;
+}
+
+function formatTime(ts: number): string {
+  const d = new Date(ts);
+  const today = new Date();
+  const sameDay =
+    d.getFullYear() === today.getFullYear() &&
+    d.getMonth() === today.getMonth() &&
+    d.getDate() === today.getDate();
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  if (sameDay) return `сегодня в ${hh}:${mm}`;
+  const tomorrow = new Date(today);
+  tomorrow.setDate(today.getDate() + 1);
+  if (
+    d.getFullYear() === tomorrow.getFullYear() &&
+    d.getMonth() === tomorrow.getMonth() &&
+    d.getDate() === tomorrow.getDate()
+  ) {
+    return `завтра в ${hh}:${mm}`;
+  }
+  return new Intl.DateTimeFormat('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }).format(d);
+}
+
+function formatRelative(ms: number): string {
+  const sec = Math.round(ms / 1000);
+  if (sec < 60) return `${sec} сек`;
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min} мин`;
+  const h = Math.round(min / 60);
+  if (h < 24) return `${h} ч ${min % 60 ? `${min % 60} мин` : ''}`.trim();
+  return `${Math.round(h / 24)} сут`;
 }
 
 function ScopeButton({
