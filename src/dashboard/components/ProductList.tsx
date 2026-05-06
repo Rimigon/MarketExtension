@@ -1,7 +1,9 @@
 import { useMemo } from 'react';
-import { formatPrice } from '@/shared/format';
+import { formatPrice, formatPercent } from '@/shared/format';
 import { MARKETPLACE_LABELS } from '@/shared/constants';
 import type { Product } from '@/shared/types';
+
+export type Trend = { abs: number; pct: number; firstPrice: number; firstAt: number } | null;
 
 export type SortKey = 'updated' | 'price-asc' | 'price-desc' | 'discount' | 'title';
 
@@ -23,6 +25,7 @@ export const DEFAULT_FILTERS: ListFilters = {
 
 interface Props {
   products: Product[];
+  trends: Record<string, Trend>;
   selectedId: string | null;
   onSelect: (id: string) => void;
   search: string;
@@ -35,6 +38,7 @@ interface Props {
 
 export function ProductList({
   products,
+  trends,
   selectedId,
   onSelect,
   search,
@@ -136,9 +140,7 @@ export function ProductList({
                   </div>
                   <div className="text-right text-sm">
                     <div className="font-medium text-slate-900">{formatPrice(p.currentPrice)}</div>
-                    {p.discountPct ? (
-                      <div className="text-xs text-rose-600">−{p.discountPct}%</div>
-                    ) : null}
+                    <TrendChip trend={trends[p.id] ?? null} />
                     {p.goal?.targetPrice != null && (
                       <div className="mt-0.5 text-[10px] text-slate-500">
                         цель {formatPrice(p.goal.targetPrice)}
@@ -239,6 +241,20 @@ export function applyFilters(products: Product[], f: ListFilters): Product[] {
     if (f.withGoalOnly && p.goal?.targetPrice == null) return false;
     return true;
   });
+}
+
+function TrendChip({ trend }: { trend: Trend }) {
+  if (!trend || trend.pct === 0) return null;
+  // По соглашению: цена упала (pct < 0) — зелёный (хорошо), цена выросла (pct > 0) — красный.
+  const isDrop = trend.pct < 0;
+  const sign = isDrop ? '−' : '+';
+  const tone = isDrop ? 'text-emerald-600' : 'text-rose-600';
+  return (
+    <div className={`text-xs ${tone}`}>
+      {sign}
+      {formatPercent(Math.abs(trend.pct))}
+    </div>
+  );
 }
 
 export function applySort(products: Product[], sort: SortKey): Product[] {

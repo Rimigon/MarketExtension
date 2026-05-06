@@ -12,6 +12,7 @@ test.describe('dashboard', () => {
     await expect(page.getByRole('button', { name: 'Архив' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Аналитика' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Уведомления' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Настройки' })).toBeVisible();
 
     // Default user collections are seeded on first run.
     await expect(page.getByRole('button', { name: /Хочу купить/ })).toBeVisible();
@@ -35,12 +36,22 @@ test.describe('dashboard', () => {
     await expect(page.getByText('Потенциал экономии')).toBeVisible();
   });
 
-  test('options page exposes export/import controls', async ({ context, extensionId }) => {
+  test('Настройки tab opens the unified settings page', async ({ context, extensionId }) => {
     const page = await context.newPage();
-    await page.goto(optionsUrl(extensionId));
+    await page.goto(dashboardUrl(extensionId));
 
-    await expect(page.getByRole('heading', { name: /Настройки/ })).toBeVisible();
+    await page.getByRole('button', { name: 'Настройки' }).click();
+    await expect(page.getByRole('heading', { name: 'Настройки', exact: true })).toBeVisible();
+    await expect(page.getByText('Обновлять при заходе на карточку')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Экспорт JSON' })).toBeVisible();
     await expect(page.getByRole('button', { name: /Импорт JSON/ })).toBeVisible();
+  });
+
+  test('legacy options URL redirects into dashboard #settings', async ({ context, extensionId }) => {
+    const page = await context.newPage();
+    await page.goto(optionsUrl(extensionId));
+    // After redirect we should be on dashboard at #settings hash with the panel rendered.
+    await expect(page).toHaveURL(/dashboard\/index\.html#settings$/);
+    await expect(page.getByRole('heading', { name: 'Настройки', exact: true })).toBeVisible();
   });
 });

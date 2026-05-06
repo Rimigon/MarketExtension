@@ -52,6 +52,8 @@ export default defineManifest({
     'https://*.wildberries.ru/*',
     // WB exposes its catalog data via u-card.wb.ru / card.wb.ru — needed for the JSON API path.
     'https://*.wb.ru/*',
+    // basket-XX.wbbasket.ru hosts the rich card.json (description + specs) and product images.
+    'https://*.wbbasket.ru/*',
     'https://market.yandex.ru/*',
   ],
   web_accessible_resources: [

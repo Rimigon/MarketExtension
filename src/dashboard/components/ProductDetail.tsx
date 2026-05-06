@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { sendRpc } from '@/shared/rpc';
 import { formatPrice, formatPercent, formatDateTime } from '@/shared/format';
 import { MARKETPLACE_LABELS } from '@/shared/constants';
@@ -38,6 +38,16 @@ export function ProductDetail({ product, collections, onRemove, onChanged }: Pro
   const [refreshing, setRefreshing] = useState(false);
   const [refreshHint, setRefreshHint] = useState<string | null>(null);
 
+  const lifetimeTrend = useMemo(() => {
+    if (points.length < 2 || product.currentPrice == null) return null;
+    const sorted = [...points].sort((a, b) => a.timestamp - b.timestamp);
+    const first = sorted[0];
+    if (!first || first.price <= 0) return null;
+    const abs = product.currentPrice - first.price;
+    if (abs === 0) return null;
+    return { abs, pct: abs / first.price };
+  }, [points, product.currentPrice]);
+
   useEffect(() => {
     let cancelled = false;
     setHistoryLoading(true);
@@ -76,11 +86,16 @@ export function ProductDetail({ product, collections, onRemove, onChanged }: Pro
                 {formatPrice(product.oldPrice)}
               </span>
             )}
-            {product.discountPct ? (
-              <span className="rounded bg-rose-50 px-2 py-0.5 text-xs font-medium text-rose-700">
-                −{product.discountPct}%
-              </span>
-            ) : null}
+            {lifetimeTrend &&
+              (lifetimeTrend.pct < 0 ? (
+                <span className="rounded bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                  −{formatPercent(Math.abs(lifetimeTrend.pct))} с момента добавления
+                </span>
+              ) : (
+                <span className="rounded bg-rose-50 px-2 py-0.5 text-xs font-medium text-rose-700">
+                  +{formatPercent(lifetimeTrend.pct)} с момента добавления
+                </span>
+              ))}
           </div>
         </div>
         <div className="flex flex-col items-end gap-2">

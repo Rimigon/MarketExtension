@@ -1,18 +1,26 @@
 import type { Parser } from '../base';
 import { makeSpaWatcher } from '../base';
 import { extractOzonProduct, isOzonProductPage } from './extract';
+import { OZON_SELECTORS } from './selectors';
 
 /**
- * Anchor strategy: ALWAYS pin the «Track price» button right after the product heading (h1).
- * This is the most stable spot on Ozon's card — h1 isn't re-rendered when the user picks a color
- * or size variant, doesn't get duplicated in sticky bars, and has a consistent layout across A/B.
+ * Anchor strategy: prefer placing the «Track price» button right after the price block,
+ * which is what the user expects visually (button under the price).
  *
  * Order of preference:
- *   1. `[data-widget="webProductHeading"]` — the canonical heading block.
- *   2. Bare `h1` element — last-resort fallback if the data-widget naming changes.
+ *   1. Price-block widgets (`webPrice`, sticky/account/main fallbacks).
+ *   2. Heading widgets — used when the price block isn't yet rendered (skeleton state)
+ *      or the user is in a region where pricing is suppressed.
+ *   3. Bare `h1` as the last-resort fallback.
+ *
+ * Each candidate must be on screen with non-trivial size — Ozon ships A/B variants where
+ * the same selector can match invisible/empty elements.
  */
-function findHeadingAnchor(doc: Document): HTMLElement | null {
-  const candidates = [
+function findInjectionAnchor(doc: Document): HTMLElement | null {
+  const candidates: HTMLElement[] = [
+    ...OZON_SELECTORS.priceAnchor.flatMap((sel) =>
+      Array.from(doc.querySelectorAll<HTMLElement>(sel)),
+    ),
     ...Array.from(doc.querySelectorAll<HTMLElement>('[data-widget="webProductHeading"]')),
     ...Array.from(doc.querySelectorAll<HTMLElement>('h1[data-widget*="ProductHeading"]')),
     ...Array.from(doc.querySelectorAll<HTMLElement>('h1[itemprop="name"]')),
@@ -45,7 +53,7 @@ export const ozonParser: Parser = {
   },
 
   extractAnchorElement(doc) {
-    return findHeadingAnchor(doc);
+    return findInjectionAnchor(doc);
   },
 
   watchSpa: makeSpaWatcher(),

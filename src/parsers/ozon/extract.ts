@@ -134,16 +134,25 @@ function extractPriceTiersFromBlock(block: HTMLElement): PriceTier[] {
   // Note: JavaScript `\b` is ASCII-only and won't match a boundary after Cyrillic «и» — so we don't
   // rely on word boundaries here. The phrasing alone is unambiguous: "С банками" doesn't match
   // "С другими банками" because "другими" sits between «С» and «банками».
-  const labelDiscounted = pickLabelFromText(blockText, [
-    /С\s+банками/i,
+  // Display labels are normalized — the page's "С банками" wording is opaque to users not paying
+  // through Ozon's bank partners; we surface it as "С Ozon Картой" since that's the same tier
+  // for everyone with an Ozon Card and the brand-recognizable name.
+  const rawDiscounted = pickLabelFromText(blockText, [
     /С\s+Ozon\s+Карт(?:ой|ы)?/i,
     /Ozon\s+Premium/i,
+    /С\s+банками/i,
   ]);
-  const labelRegular = pickLabelFromText(blockText, [
-    /С\s+другими\s+банками/i,
+  const labelDiscounted = rawDiscounted && /С\s+банками/i.test(rawDiscounted)
+    ? 'С Ozon Картой'
+    : rawDiscounted;
+  const rawRegular = pickLabelFromText(blockText, [
     /Без\s+Ozon\s+Карт(?:ы)?/i,
+    /С\s+другими\s+банками/i,
     /Обычная\s+цена/i,
   ]);
+  const labelRegular = rawRegular && /С\s+другими\s+банками/i.test(rawRegular)
+    ? 'Без Ozon Карты'
+    : rawRegular;
 
   const uniquePricesAsc = Array.from(new Set(candidates.map((c) => c.price))).sort((a, b) => a - b);
 

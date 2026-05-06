@@ -1,9 +1,15 @@
-import type { Availability, ParsedProduct, ParserStatus, ProductSpec } from '@/shared/types';
+import type {
+  Availability,
+  ParsedProduct,
+  ParserStatus,
+  PriceTier,
+  ProductSpec,
+} from '@/shared/types';
 import { canonicalizeUrl } from '@/shared/url';
 import { findJsonLdProduct, parsePriceText, readJsonLd } from '../base';
 import { YM_SELECTORS } from './selectors';
 
-const PARSER_VERSION = 1;
+const PARSER_VERSION = 2;
 const MAX_DESCRIPTION_CHARS = 5000;
 const MAX_SPECS = 100;
 
@@ -50,8 +56,73 @@ function extractReviewCountFromText(text: string | null | undefined): number | n
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * Yandex's `[data-zone-name="productDescription"]` block frequently nests:
+ *   - the actual description paragraph(s) we want,
+ *   - the «Общие характеристики» specs list,
+ *   - certificate/document widgets injected by the Apiary front-end framework
+ *     (their initialization payload leaks into textContent as raw JSON-ish noise),
+ *   - footer disclaimers, related-links and «Показать полностью / Все характеристики».
+ * We clone the block, remove obvious noise, then trim known suffix boundaries.
+ */
 function extractDescription(block: HTMLElement): string | undefined {
-  const text = block.textContent?.replace(/\s+/g, ' ').trim();
+  const clone = block.cloneNode(true) as HTMLElement;
+
+  // Strip elements whose textContent is structurally not part of the description.
+  const noiseSelectors = [
+    'script',
+    'style',
+    'noscript',
+    'template',
+    'button',
+    'dl',
+    'table',
+    'tr',
+    '[data-zone-name="productSpecs"]',
+    '[data-baobab-name*="specs" i]',
+    '[data-baobab-name*="Documents" i]',
+    '[data-baobab-name*="certificate" i]',
+    '[data-baobab-name*="aboutRecom" i]',
+    '[data-baobab-name*="related" i]',
+    '[data-apiary-widget-name]',
+    '[data-apiary-widget-id]',
+    '[data-apiary-marker-portal]',
+    'apiary-portal-marker',
+  ];
+  for (const sel of noiseSelectors) {
+    for (const el of Array.from(clone.querySelectorAll(sel))) {
+      el.parentElement?.removeChild(el);
+    }
+  }
+
+  let text = clone.textContent?.replace(/\s+/g, ' ').trim();
+  if (!text) return undefined;
+
+  // Cut at known section boundaries that may still slip through (e.g. when the
+  // specs block isn't matched by a selector but Yandex prints the heading inline).
+  const cutMarkers = [
+    'Общие характеристики',
+    'Все характеристики',
+    'Сертификаты',
+    'Сертификат соответствия',
+    'Перед покупкой уточняйте',
+    'Внешний вид товаров',
+    'window.apiary',
+    'apiarySleepingQueue',
+    'apiaryMarkerPortal',
+  ];
+  for (const marker of cutMarkers) {
+    const idx = text.indexOf(marker);
+    if (idx > 0) text = text.slice(0, idx).trim();
+  }
+
+  // Collapse the «Показать полностью / Скрыть» toggles and stray apiary JSON tails.
+  text = text
+    .replace(/Показать\s+(полностью|больше|весь)\s*\.?\s*$/i, '')
+    .replace(/Скрыть\s*$/i, '')
+    .replace(/^О\s+товаре[\s.:]*/i, '')
+    .trim();
+
   if (!text) return undefined;
   return text.length > MAX_DESCRIPTION_CHARS ? text.slice(0, MAX_DESCRIPTION_CHARS) : text;
 }
@@ -217,6 +288,81 @@ function fromJsonLd(doc: Document): Partial<ParsedProduct> | null {
   return result;
 }
 
+const PURE_PRICE_RE = /^\s*\d[\d\s ]*[.,]?\d*\s*₽\s*$/;
+
+/**
+ * Walk a price block and pull every distinct ruble value with a nearby «Плюс / Без Плюса /
+ * Без скидки» hint so we can label tiers. Returns ascending by amount.
+ */
+function extractYmPriceTiers(block: HTMLElement): PriceTier[] {
+  const seen = new Map<number, { kind: PriceTier['kind']; label: string }>();
+  const blockText = (block.textContent ?? '').replace(/\s+/g, ' ');
+  const hasPlus = /с\s+Плюс/i.test(blockText);
+  const hasNoPlus = /без\s+Плюс/i.test(blockText);
+
+  const elements = block.querySelectorAll<HTMLElement>('span, div, b, strong, s, del');
+  for (const el of elements) {
+    // Use direct text only — avoids double-counting parent + nested span.
+    let direct = '';
+    for (const child of Array.from(el.childNodes)) {
+      if (child.nodeType === 3 /* Node.TEXT_NODE */) direct += child.textContent ?? '';
+    }
+    direct = direct.replace(/\s+/g, ' ').trim();
+    if (!direct || !PURE_PRICE_RE.test(direct)) continue;
+    const price = parsePriceText(direct);
+    if (price == null || price < 1 || price > 100_000_000) continue;
+    if (seen.has(price)) continue;
+
+    // Look at the surrounding ~80 chars of context for a label.
+    const ctx = (el.parentElement?.textContent ?? '').replace(/\s+/g, ' ');
+    const idx = ctx.indexOf(direct);
+    const around = idx >= 0 ? ctx.slice(Math.max(0, idx - 60), idx + direct.length + 60) : ctx;
+
+    let kind: PriceTier['kind'] = 'regular';
+    let label = 'Цена';
+    if (/с\s+Плюс/i.test(around)) {
+      kind = 'discounted';
+      label = 'С Яндекс Плюсом';
+    } else if (/без\s+Плюс/i.test(around)) {
+      kind = 'regular';
+      label = 'Без Плюса';
+    } else if (
+      /\bстарая\s+цена|без\s+скидки|обычная\s+цена/i.test(around) ||
+      el.tagName === 'S' ||
+      el.tagName === 'DEL' ||
+      hasStrikethrough(el)
+    ) {
+      kind = 'original';
+      label = 'Без скидки';
+    } else if (hasPlus && !hasNoPlus) {
+      kind = 'discounted';
+      label = 'С Яндекс Плюсом';
+    }
+    seen.set(price, { kind, label });
+  }
+
+  if (seen.size === 0) return [];
+
+  const sorted = Array.from(seen.entries()).sort((a, b) => a[0] - b[0]);
+  // If multiple prices and no explicit Plus label was matched, assume the lowest is the Plus tier
+  // (Yandex shows the Plus price as the bold headline by default).
+  if (sorted.length >= 2 && !Array.from(seen.values()).some((v) => v.kind === 'discounted')) {
+    sorted[0]![1] = { kind: 'discounted', label: 'С Яндекс Плюсом' };
+    if (sorted.length === 2) {
+      sorted[1]![1] = { kind: 'original', label: 'Без скидки' };
+    }
+  }
+  return sorted.map(([amount, meta]) => ({ amount, kind: meta.kind, label: meta.label }));
+}
+
+function hasStrikethrough(el: HTMLElement): boolean {
+  if (!el || !el.style) return false;
+  const inline = el.style.textDecoration?.toLowerCase() ?? '';
+  if (inline.includes('line-through')) return true;
+  const cls = typeof el.className === 'string' ? el.className.toLowerCase() : '';
+  return /line-through|strike|old-?price/.test(cls);
+}
+
 function fromDom(doc: Document): Partial<ParsedProduct> {
   const result: Partial<ParsedProduct> = {};
 
@@ -226,17 +372,35 @@ function fromDom(doc: Document): Partial<ParsedProduct> {
     if (text) result.title = text;
   }
 
-  const finalEl = firstMatch<HTMLElement>(doc, YM_SELECTORS.finalPrice);
-  if (finalEl) {
-    const num = parsePriceText(finalEl.textContent);
-    if (num != null && num > 0) result.currentPrice = num;
+  // Pull all distinct prices from the price block — gives us Plus-tier visibility.
+  const priceBlock = firstMatch<HTMLElement>(doc, YM_SELECTORS.priceAnchor);
+  if (priceBlock) {
+    const tiers = extractYmPriceTiers(priceBlock);
+    if (tiers.length > 0) {
+      result.priceTiers = tiers;
+      // Headline price = the «discounted» tier if present, otherwise the lowest visible price.
+      const discounted = tiers.find((t) => t.kind === 'discounted') ?? tiers[0]!;
+      result.currentPrice = discounted.amount;
+      const original = tiers.find((t) => t.kind === 'original');
+      if (original && original.amount > discounted.amount) result.oldPrice = original.amount;
+    }
   }
 
-  const oldEl = firstMatch<HTMLElement>(doc, YM_SELECTORS.oldPrice);
-  if (oldEl) {
-    const num = parsePriceText(oldEl.textContent);
-    if (num != null && num > 0 && result.currentPrice != null && num > result.currentPrice) {
-      result.oldPrice = num;
+  if (result.currentPrice == null) {
+    const finalEl = firstMatch<HTMLElement>(doc, YM_SELECTORS.finalPrice);
+    if (finalEl) {
+      const num = parsePriceText(finalEl.textContent);
+      if (num != null && num > 0) result.currentPrice = num;
+    }
+  }
+
+  if (result.oldPrice == null) {
+    const oldEl = firstMatch<HTMLElement>(doc, YM_SELECTORS.oldPrice);
+    if (oldEl) {
+      const num = parsePriceText(oldEl.textContent);
+      if (num != null && num > 0 && result.currentPrice != null && num > result.currentPrice) {
+        result.oldPrice = num;
+      }
     }
   }
 
@@ -291,8 +455,11 @@ export function extractYandexMarketProduct(doc: Document, url: URL): ParsedProdu
     availability: fromHtml.availability ?? fromLd.availability,
     rating: fromLd.rating ?? fromHtml.rating,
     reviewCount: fromHtml.reviewCount ?? fromLd.reviewCount,
-    description: pickLongest(fromHtml.description, fromLd.description),
+    // JSON-LD's description is curated text from the seller catalogue and almost always cleaner
+    // than the DOM scrape. Use the DOM version only as a fallback when JSON-LD is empty.
+    description: fromLd.description ?? fromHtml.description,
     specs: fromHtml.specs && fromHtml.specs.length > 0 ? fromHtml.specs : undefined,
+    priceTiers: fromHtml.priceTiers && fromHtml.priceTiers.length > 0 ? fromHtml.priceTiers : undefined,
   };
 
   const currentPrice = merged.currentPrice ?? null;
@@ -324,6 +491,7 @@ export function extractYandexMarketProduct(doc: Document, url: URL): ParsedProdu
     oldPrice,
     discountPct,
     availability,
+    priceTiers: merged.priceTiers,
     rating: merged.rating,
     reviewCount: merged.reviewCount,
     description: merged.description,

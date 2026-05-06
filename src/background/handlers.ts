@@ -106,6 +106,34 @@ export const handlers: RpcHandlerMap = {
     return { points, aggregates };
   },
 
+  'priceTrends/list': async () => {
+    const allPoints = await db().pricePoints.toArray();
+    const byProduct = new Map<string, PricePoint[]>();
+    for (const p of allPoints) {
+      const arr = byProduct.get(p.productId);
+      if (arr) arr.push(p);
+      else byProduct.set(p.productId, [p]);
+    }
+    const trends: Record<string, { abs: number; pct: number; firstPrice: number; firstAt: number } | null> = {};
+    for (const [productId, points] of byProduct) {
+      if (points.length < 2) {
+        trends[productId] = null;
+        continue;
+      }
+      const sorted = [...points].sort((a, b) => a.timestamp - b.timestamp);
+      const first = sorted[0];
+      const last = sorted[sorted.length - 1];
+      if (first.price <= 0) {
+        trends[productId] = null;
+        continue;
+      }
+      const abs = last.price - first.price;
+      const pct = abs / first.price;
+      trends[productId] = { abs, pct, firstPrice: first.price, firstAt: first.timestamp };
+    }
+    return { trends };
+  },
+
   'product/list': async ({ limit, archived }) => {
     const products = await productsRepo.list({ limit, archived });
     return { products };

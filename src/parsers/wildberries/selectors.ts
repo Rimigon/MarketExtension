@@ -14,11 +14,18 @@ export const WB_SELECTORS = {
     '.j-price-block',
   ],
   finalPrice: [
+    // Wallet price first — it's the prominent figure on the page (lowest visible tier).
+    // 2025+ scoped camelCase, then legacy hyphenated BEM.
+    '[class*="priceBlockWalletPrice"]',
+    '[class*="WalletPrice" i]',
+    '.price-block__wallet-price',
+    'span.wallet-price',
     '.price-block__final-price',
     'ins.price-block__final-price',
-    '.price-block__wallet-price',
   ],
   oldPrice: [
+    '[class*="priceBlockOldPrice"]',
+    '[class*="OldPrice" i]',
     '.price-block__old-price del',
     '.price-block__old-price',
     'del.price-block__old-price',

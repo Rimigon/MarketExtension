@@ -10,6 +10,7 @@ export type ScopeFilter =
   | { kind: 'archived' }
   | { kind: 'notifications' }
   | { kind: 'stats' }
+  | { kind: 'settings' }
   | { kind: 'collection'; id: string };
 
 interface Props {
@@ -104,6 +105,11 @@ export function Sidebar({
           active={scope.kind === 'notifications'}
           onClick={() => onScopeChange({ kind: 'notifications' })}
           countTone={unreadNotifications > 0 ? 'badge' : 'neutral'}
+        />
+        <ScopeButton
+          label={t('sidebar.settings')}
+          active={scope.kind === 'settings'}
+          onClick={() => onScopeChange({ kind: 'settings' })}
         />
       </nav>
 

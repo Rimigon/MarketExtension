@@ -116,14 +116,14 @@ describe('Ozon: real card 1630582255 (bank discount + non-detected strikethrough
     expect(parsed!.discountPct).toBeGreaterThan(50);
   });
 
-  it('emits 3 price tiers: «С банками», «С другими банками», «Без скидки»', () => {
+  it('emits 3 price tiers, normalizing «С банками» → «С Ozon Картой»', () => {
     const doc = loadDoc('real-card-1630582255.html');
     const parsed = extractOzonProduct(doc, url);
     expect(parsed!.priceTiers).toBeDefined();
     expect(parsed!.priceTiers!.length).toBe(3);
     const tiers = parsed!.priceTiers!;
-    expect(tiers[0]).toEqual({ label: 'С банками', amount: 1261, kind: 'discounted' });
-    expect(tiers[1]).toEqual({ label: 'С другими банками', amount: 1386, kind: 'regular' });
+    expect(tiers[0]).toEqual({ label: 'С Ozon Картой', amount: 1261, kind: 'discounted' });
+    expect(tiers[1]).toEqual({ label: 'Без Ozon Карты', amount: 1386, kind: 'regular' });
     expect(tiers[2]).toEqual({ label: 'Без скидки', amount: 3291, kind: 'original' });
   });
 

@@ -38,6 +38,7 @@ const RU: Messages = {
   'sidebar.archived': 'Архив',
   'sidebar.stats': 'Аналитика',
   'sidebar.notifications': 'Уведомления',
+  'sidebar.settings': 'Настройки',
   'sidebar.collections': 'Коллекции',
   'sidebar.collectionsEdit': 'Изменить',
   'sidebar.collectionsDone': 'Готово',

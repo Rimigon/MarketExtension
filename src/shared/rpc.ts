@@ -80,6 +80,13 @@ export type RpcMap = {
     request: { productId: string; since?: number };
     response: { points: PricePoint[]; aggregates: PriceHistoryAggregates };
   };
+  'priceTrends/list': {
+    request: Record<string, never>;
+    response: {
+      /** productId → lifetime change vs the earliest recorded point. null если истории < 2 точек. */
+      trends: Record<string, { abs: number; pct: number; firstPrice: number; firstAt: number } | null>;
+    };
+  };
   'recommendation/get': {
     request: { productId: string };
     response: { recommendation: Recommendation };

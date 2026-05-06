@@ -12,6 +12,7 @@ import {
 import { ProductDetail } from './components/ProductDetail';
 import { NotificationsList } from './components/NotificationsList';
 import { StatsPage } from './components/StatsPage';
+import { SettingsPage } from './components/SettingsPage';
 
 export function App() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -19,8 +20,16 @@ export function App() {
   const [collections, setCollections] = useState<Collection[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [trends, setTrends] = useState<
+    Record<string, { abs: number; pct: number; firstPrice: number; firstAt: number } | null>
+  >({});
   const [loading, setLoading] = useState(true);
-  const [scope, setScope] = useState<ScopeFilter>({ kind: 'all' });
+  const [scope, setScope] = useState<ScopeFilter>(() => {
+    if (typeof window !== 'undefined' && window.location.hash === '#settings') {
+      return { kind: 'settings' };
+    }
+    return { kind: 'all' };
+  });
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortKey>('updated');
   const [filters, setFilters] = useState<ListFilters>(DEFAULT_FILTERS);
@@ -31,18 +40,20 @@ export function App() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [active, archived, notes, unread, cols] = await Promise.all([
+    const [active, archived, notes, unread, cols, tr] = await Promise.all([
       sendRpc('product/list', { archived: false }),
       sendRpc('product/list', { archived: true }),
       sendRpc('notifications/list', { limit: 200 }),
       sendRpc('notifications/unreadCount', {}),
       sendRpc('collections/list', {}),
+      sendRpc('priceTrends/list', {}),
     ]);
     setProducts(active.products);
     setArchivedProducts(archived.products);
     setNotifications(notes.items);
     setUnreadCount(unread.count);
     setCollections(cols.collections);
+    setTrends(tr.trends);
     setLoading(false);
   }, []);
 
@@ -133,6 +144,8 @@ export function App() {
             setSelectedId(id);
           }}
         />
+      ) : scope.kind === 'settings' ? (
+        <SettingsPage />
       ) : scope.kind === 'notifications' ? (
         <>
           <NotificationsList
@@ -164,6 +177,7 @@ export function App() {
         <>
           <ProductList
             products={visibleProducts}
+            trends={trends}
             selectedId={selectedId}
             onSelect={setSelectedId}
             search={search}
