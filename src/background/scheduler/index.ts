@@ -17,8 +17,17 @@ import { execute } from './executor';
 const ALARM_NAME = 'pricewatch:bulk-refresh';
 const BROADCAST_TYPE = 'pricewatch:scheduledRefreshDone';
 const NOTIF_ID_PREFIX = 'pricewatch:scheduledRefresh:';
+// `lastRunAt` and the schedule signature live in chrome.storage.local so they
+// survive browser restarts — needed for daily-mode catch-up logic.
 const LAST_RUN_KEY = 'pricewatch:scheduler:lastRunAt';
+const SIGNATURE_KEY = 'pricewatch:scheduler:signature';
 const PENDING_SUMMARY_KEY = 'pricewatch:scheduler:pendingSummary';
+
+interface ScheduleSignature {
+  mode: 'interval' | 'daily';
+  intervalMinutes: number;
+  dailyAtHour: number | null;
+}
 
 interface ScheduledRefreshSummary {
   total: number;
@@ -68,49 +77,81 @@ export async function applySettings(): Promise<void> {
   const settings = await settingsRepo.get();
   if (!settings.scheduledUpdates) {
     await chrome.alarms.clear(ALARM_NAME);
+    await writeSignature(null);
     console.info('[PriceWatch] scheduler disabled');
     return;
   }
 
+  const wantSig: ScheduleSignature = {
+    mode: settings.dailyAtHour != null ? 'daily' : 'interval',
+    intervalMinutes: settings.updateInterval,
+    dailyAtHour: settings.dailyAtHour,
+  };
+  const haveSig = await readSignature();
   const existing = await chrome.alarms.get(ALARM_NAME);
+  const sameSchedule =
+    existing != null &&
+    haveSig != null &&
+    haveSig.mode === wantSig.mode &&
+    haveSig.intervalMinutes === wantSig.intervalMinutes &&
+    haveSig.dailyAtHour === wantSig.dailyAtHour;
+
+  if (sameSchedule) {
+    // Bootstrap path on SW wake — schedule unchanged, leave the alarm running.
+    console.info('[PriceWatch] scheduler already armed, skipping');
+    return;
+  }
 
   if (settings.dailyAtHour != null) {
-    // Daily mode: alarm period is 24h. The existing alarm is correct iff
-    // its period is 24h (we don't try to verify the exact firing hour —
-    // recreate on the next user interaction if wrong).
-    if (existing && existing.periodInMinutes === 24 * 60) {
-      console.info('[PriceWatch] scheduler already armed (daily), skipping');
-      return;
-    }
-    const delayMs = msUntilDailyHour(settings.dailyAtHour);
-    await chrome.alarms.create(ALARM_NAME, {
-      periodInMinutes: 24 * 60,
-      delayInMinutes: Math.max(1, Math.round(delayMs / 60_000)),
-    });
+    await armDaily(settings.dailyAtHour);
+  } else {
+    await armInterval(settings.updateInterval);
+  }
+  await writeSignature(wantSig);
+}
+
+/**
+ * Daily-mode arming. If the configured hour has already passed today AND we
+ * haven't run since the last occurrence of that hour, fire a catch-up bulk
+ * refresh immediately (don't make the user wait until tomorrow). Then schedule
+ * the alarm for the next occurrence.
+ */
+async function armDaily(hour: number): Promise<void> {
+  const now = Date.now();
+  const todayAt = atLocalHour(now, hour); // today at HH:00 local time
+  const lastRun = (await readLastRunAt()) ?? 0;
+
+  // Catch-up: today's hour passed and we never ran for it (browser was off).
+  if (now >= todayAt && lastRun < todayAt) {
     console.info(
-      '[PriceWatch] scheduler armed: daily at',
-      settings.dailyAtHour + ':00, first in',
-      Math.round(delayMs / 60_000),
-      'min',
+      '[PriceWatch] daily catch-up: fired late by',
+      Math.round((now - todayAt) / 60_000),
+      'min — running now',
     );
-    return;
+    // Mark as run *before* the heavy work so a parallel SW wake doesn't double-fire.
+    await writeLastRunAt(now);
+    void runScheduledBulk();
   }
 
-  // Interval mode.
-  if (existing && existing.periodInMinutes === settings.updateInterval) {
-    // Same interval — leave the running timer alone.
-    console.info('[PriceWatch] scheduler already armed (interval), skipping');
-    return;
-  }
+  const delayMs = msUntilDailyHour(hour);
   await chrome.alarms.create(ALARM_NAME, {
-    periodInMinutes: settings.updateInterval,
-    delayInMinutes: settings.updateInterval,
+    periodInMinutes: 24 * 60,
+    delayInMinutes: Math.max(1, Math.round(delayMs / 60_000)),
   });
   console.info(
-    '[PriceWatch] scheduler armed: every',
-    settings.updateInterval,
+    '[PriceWatch] scheduler armed: daily at',
+    String(hour).padStart(2, '0') + ':00, first in',
+    Math.round(delayMs / 60_000),
     'min',
   );
+}
+
+async function armInterval(intervalMinutes: number): Promise<void> {
+  await chrome.alarms.create(ALARM_NAME, {
+    periodInMinutes: intervalMinutes,
+    delayInMinutes: intervalMinutes,
+  });
+  console.info('[PriceWatch] scheduler armed: every', intervalMinutes, 'min');
 }
 
 /** Stub kept for callers that used to reconcile the per-product queue. */
@@ -368,9 +409,16 @@ function msUntilDailyHour(hour: number): number {
   return target.getTime() - now.getTime();
 }
 
+/** Today (local) at the given hour:00:00. */
+function atLocalHour(nowMs: number, hour: number): number {
+  const d = new Date(nowMs);
+  d.setHours(hour, 0, 0, 0);
+  return d.getTime();
+}
+
 async function readLastRunAt(): Promise<number | null> {
   try {
-    const r = await chrome.storage.session.get(LAST_RUN_KEY);
+    const r = await chrome.storage.local.get(LAST_RUN_KEY);
     const v = r[LAST_RUN_KEY];
     return typeof v === 'number' ? v : null;
   } catch {
@@ -380,7 +428,34 @@ async function readLastRunAt(): Promise<number | null> {
 
 async function writeLastRunAt(ts: number): Promise<void> {
   try {
-    await chrome.storage.session.set({ [LAST_RUN_KEY]: ts });
+    await chrome.storage.local.set({ [LAST_RUN_KEY]: ts });
+  } catch {
+    // ignore
+  }
+}
+
+async function readSignature(): Promise<ScheduleSignature | null> {
+  try {
+    const r = await chrome.storage.local.get(SIGNATURE_KEY);
+    const v = r[SIGNATURE_KEY];
+    if (
+      v &&
+      typeof v === 'object' &&
+      (v.mode === 'interval' || v.mode === 'daily') &&
+      typeof v.intervalMinutes === 'number'
+    ) {
+      return v as ScheduleSignature;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeSignature(sig: ScheduleSignature | null): Promise<void> {
+  try {
+    if (sig == null) await chrome.storage.local.remove(SIGNATURE_KEY);
+    else await chrome.storage.local.set({ [SIGNATURE_KEY]: sig });
   } catch {
     // ignore
   }

@@ -24,9 +24,18 @@ interface Props {
 export function SettingsPage({ onSettingsSaved }: Props = {}) {
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  // Schedule (interval + dailyAtHour) is buffered locally and only sent to the
+  // background when the user clicks «Применить». Other toggles still apply
+  // immediately because their effect is local-only.
+  const [pendingInterval, setPendingInterval] = useState<UserSettings['updateInterval']>(60);
+  const [pendingDailyHour, setPendingDailyHour] = useState<number | null>(null);
 
   useEffect(() => {
-    void sendRpc('settings/get', {}).then((resp) => setSettings(resp.settings));
+    void sendRpc('settings/get', {}).then((resp) => {
+      setSettings(resp.settings);
+      setPendingInterval(resp.settings.updateInterval);
+      setPendingDailyHour(resp.settings.dailyAtHour);
+    });
   }, []);
 
   async function patch(patch: Partial<Omit<UserSettings, 'id'>>) {
@@ -36,6 +45,31 @@ export function SettingsPage({ onSettingsSaved }: Props = {}) {
     setSettings(resp.settings);
     setSavedAt(Date.now());
     onSettingsSaved?.();
+  }
+
+  async function applySchedule() {
+    if (!settings) return;
+    await patch({ updateInterval: pendingInterval, dailyAtHour: pendingDailyHour });
+  }
+
+  function resetSchedule() {
+    if (!settings) return;
+    setPendingInterval(settings.updateInterval);
+    setPendingDailyHour(settings.dailyAtHour);
+  }
+
+  const scheduleDirty =
+    settings != null &&
+    (pendingInterval !== settings.updateInterval || pendingDailyHour !== settings.dailyAtHour);
+
+  function pickInterval(value: UserSettings['updateInterval']) {
+    setPendingInterval(value);
+    if (value === 1440) {
+      // Daily mode — default to 9:00 if user hasn't picked an hour yet.
+      setPendingDailyHour((cur) => (cur == null ? 9 : cur));
+    } else {
+      setPendingDailyHour(null);
+    }
   }
 
   if (!settings) {
@@ -51,7 +85,7 @@ export function SettingsPage({ onSettingsSaved }: Props = {}) {
       <header className="border-b border-slate-200 pb-4">
         <h1 className="text-xl font-semibold text-slate-900">Настройки</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Параметры сохраняются автоматически и применяются сразу.
+          Тумблеры применяются сразу. Расписание — только по нажатию «Применить».
         </p>
       </header>
 
@@ -81,79 +115,70 @@ export function SettingsPage({ onSettingsSaved }: Props = {}) {
                 settings.scheduledUpdates ? 'border-slate-200 bg-white' : 'border-slate-100 bg-slate-50/50 opacity-60'
               }`}
             >
-              <div className="text-sm font-medium text-slate-900">Режим расписания</div>
-              <div className="mt-3 flex gap-2">
-                <button
-                  type="button"
-                  disabled={!settings.scheduledUpdates}
-                  onClick={() => void patch({ dailyAtHour: null })}
-                  className={`flex-1 rounded-md border px-3 py-2 text-sm transition ${
-                    settings.dailyAtHour == null
-                      ? 'border-brand-500 bg-brand-50 text-brand-700'
-                      : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
-                  } ${!settings.scheduledUpdates ? 'cursor-not-allowed' : ''}`}
-                >
-                  По интервалу
-                </button>
-                <button
-                  type="button"
-                  disabled={!settings.scheduledUpdates}
-                  onClick={() => void patch({ dailyAtHour: settings.dailyAtHour ?? 9 })}
-                  className={`flex-1 rounded-md border px-3 py-2 text-sm transition ${
-                    settings.dailyAtHour != null
-                      ? 'border-brand-500 bg-brand-50 text-brand-700'
-                      : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
-                  } ${!settings.scheduledUpdates ? 'cursor-not-allowed' : ''}`}
-                >
-                  Раз в сутки в…
-                </button>
+              <div className="text-sm font-medium text-slate-900">Расписание</div>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Выбери «раз в сутки» — появится поле для часа. Изменения применяются после нажатия «Применить».
+              </p>
+              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {INTERVAL_OPTIONS.map((opt) => {
+                  const selected = pendingInterval === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      disabled={!settings.scheduledUpdates}
+                      onClick={() => pickInterval(opt.value)}
+                      className={`rounded-md border px-3 py-2 text-sm transition ${
+                        selected
+                          ? 'border-brand-500 bg-brand-50 text-brand-700'
+                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                      } ${!settings.scheduledUpdates ? 'cursor-not-allowed' : ''}`}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
               </div>
 
-              {settings.dailyAtHour == null ? (
-                <>
-                  <p className="mt-3 text-xs text-slate-500">
-                    Слишком частые проверки могут перегрузить маркетплейс. Реальная частота варьируется ±20% (jitter), чтобы запросы шли неравномерно.
-                  </p>
-                  <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                    {INTERVAL_OPTIONS.map((opt) => (
-                      <button
-                        key={opt.value}
-                        type="button"
-                        disabled={!settings.scheduledUpdates}
-                        onClick={() => void patch({ updateInterval: opt.value })}
-                        className={`rounded-md border px-3 py-2 text-sm transition ${
-                          settings.updateInterval === opt.value
-                            ? 'border-brand-500 bg-brand-50 text-brand-700'
-                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
-                        } ${!settings.scheduledUpdates ? 'cursor-not-allowed' : ''}`}
-                      >
-                        {opt.label}
-                      </button>
+              {pendingDailyHour != null && (
+                <div className="mt-3 flex items-center gap-2">
+                  <label className="text-sm text-slate-700">Час:</label>
+                  <select
+                    disabled={!settings.scheduledUpdates}
+                    value={pendingDailyHour}
+                    onChange={(e) => setPendingDailyHour(Number(e.target.value))}
+                    className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-sm focus:border-brand-500 focus:outline-none disabled:cursor-not-allowed"
+                  >
+                    {HOURS.map((h) => (
+                      <option key={h} value={h}>
+                        {String(h).padStart(2, '0')}:00
+                      </option>
                     ))}
-                  </div>
-                </>
-              ) : (
-                <>
-                  <p className="mt-3 text-xs text-slate-500">
-                    Цены обновятся один раз в сутки в выбранное локальное время.
-                  </p>
-                  <div className="mt-3 flex items-center gap-2">
-                    <label className="text-sm text-slate-700">Время:</label>
-                    <select
-                      disabled={!settings.scheduledUpdates}
-                      value={settings.dailyAtHour}
-                      onChange={(e) => void patch({ dailyAtHour: Number(e.target.value) })}
-                      className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-sm focus:border-brand-500 focus:outline-none disabled:cursor-not-allowed"
-                    >
-                      {HOURS.map((h) => (
-                        <option key={h} value={h}>
-                          {String(h).padStart(2, '0')}:00
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </>
+                  </select>
+                  <span className="text-xs text-slate-500">локальное время</span>
+                </div>
               )}
+
+              <div className="mt-4 flex items-center justify-end gap-2">
+                {scheduleDirty && (
+                  <button
+                    type="button"
+                    onClick={resetSchedule}
+                    disabled={!settings.scheduledUpdates}
+                    className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-600 hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Отменить
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => void applySchedule()}
+                  disabled={!settings.scheduledUpdates || !scheduleDirty}
+                  className="rounded-md bg-brand-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Применить
+                </button>
+              </div>
             </div>
           </div>
         </section>
