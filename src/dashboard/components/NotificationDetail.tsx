@@ -25,15 +25,15 @@ export function NotificationDetail({ notification, product, onOpenProduct }: Pro
   const details = notification.details;
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto bg-white">
-      <div className="border-b border-slate-200 px-6 py-4">
+    <div className="flex h-full min-h-0 flex-col bg-white">
+      <div className="shrink-0 border-b border-slate-200 px-6 py-4">
         <div className="text-xs uppercase tracking-wide text-slate-400">Уведомление</div>
         <h1 className="mt-1 text-lg font-semibold text-slate-900">{notification.title}</h1>
         <p className="mt-1 text-sm text-slate-600">{notification.body}</p>
         <div className="mt-2 text-xs text-slate-400">{formatDateTime(notification.createdAt)}</div>
       </div>
 
-      <div className="space-y-6 px-6 py-5">
+      <div className="flex-1 space-y-6 overflow-y-auto overscroll-contain px-6 py-5">
         {details?.kind === 'rule' && (
           <RuleDetails details={details} product={product} onOpenProduct={onOpenProduct} />
         )}

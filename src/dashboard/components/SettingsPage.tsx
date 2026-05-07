@@ -82,7 +82,7 @@ export function SettingsPage({ onSettingsSaved }: Props = {}) {
   }
 
   return (
-    <div className="col-span-2 overflow-y-auto bg-slate-50 px-8 py-6">
+    <div className="col-span-2 overflow-y-auto overscroll-contain bg-slate-50 px-8 py-6">
       <header className="border-b border-slate-200 pb-4">
         <h1 className="text-xl font-semibold text-slate-900">Настройки</h1>
         <p className="mt-1 text-sm text-slate-500">

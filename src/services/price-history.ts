@@ -209,8 +209,160 @@ export function rangeCutoff(range: Range, now: number = Date.now()): number {
   }
 }
 
+export interface PricePulse {
+  /** Coefficient of variation (stddev / mean) over the trailing 30 days. null when < 2 points in window. */
+  volatility30d: number | null;
+  /** Same metric over the trailing 90 days. */
+  volatility90d: number | null;
+  /**
+   * Where the current price sits in the trailing-90d distribution (0..1).
+   * 0 = current is at or below every prior price (= near min), 1 = at or above all (= near max).
+   * null when not enough history.
+   */
+  pricePercentile90d: number | null;
+  /**
+   * Median discount depth across history: for points with oldPrice > price,
+   * (oldPrice - price) / oldPrice. null when no such points.
+   */
+  medianDiscountDepth: number | null;
+  /**
+   * Median number of days between «discountAppeared» events (transitions from
+   * 0/null discount to a non-zero one). null when fewer than 2 such events.
+   */
+  medianDiscountCycleDays: number | null;
+  /**
+   * Fraction of the last 30 daily-close samples that sat within 5% of the
+   * historical minimum (over the same 30d window). null when < 5 days of data.
+   */
+  shareDaysNearMin30d: number | null;
+}
+
+const VOLATILITY_MIN_POINTS = 2;
+const PERCENTILE_MIN_POINTS = 5;
+const NEAR_MIN_TOLERANCE = 0.05;
+
+export function computePulse(points: PricePoint[], now: number = Date.now()): PricePulse {
+  if (points.length === 0) {
+    return {
+      volatility30d: null,
+      volatility90d: null,
+      pricePercentile90d: null,
+      medianDiscountDepth: null,
+      medianDiscountCycleDays: null,
+      shareDaysNearMin30d: null,
+    };
+  }
+  const sorted = [...points].sort((a, b) => a.timestamp - b.timestamp);
+  const window30 = sorted.filter((p) => p.timestamp >= now - 30 * DAY).map((p) => p.price);
+  const window90 = sorted.filter((p) => p.timestamp >= now - 90 * DAY).map((p) => p.price);
+
+  const current = sorted[sorted.length - 1].price;
+
+  const volatility30d = coefficientOfVariation(window30);
+  const volatility90d = coefficientOfVariation(window90);
+
+  const pricePercentile90d =
+    window90.length >= PERCENTILE_MIN_POINTS ? percentileRank(window90, current) : null;
+
+  const discountDepths: number[] = [];
+  for (const p of sorted) {
+    if (p.oldPrice != null && p.oldPrice > p.price && p.oldPrice > 0) {
+      discountDepths.push((p.oldPrice - p.price) / p.oldPrice);
+    }
+  }
+  const medianDiscountDepth = discountDepths.length === 0 ? null : median(discountDepths);
+
+  // Discount-appeared transitions: a point with oldPrice > price preceded by
+  // one without. Count days between consecutive such transitions.
+  const transitionTs: number[] = [];
+  let prevHadDiscount = false;
+  for (const p of sorted) {
+    const hasDiscount = p.oldPrice != null && p.oldPrice > p.price;
+    if (hasDiscount && !prevHadDiscount) transitionTs.push(p.timestamp);
+    prevHadDiscount = hasDiscount;
+  }
+  let medianDiscountCycleDays: number | null = null;
+  if (transitionTs.length >= 2) {
+    const deltas: number[] = [];
+    for (let i = 1; i < transitionTs.length; i++) {
+      deltas.push((transitionTs[i] - transitionTs[i - 1]) / DAY);
+    }
+    medianDiscountCycleDays = median(deltas);
+  }
+
+  const shareDaysNearMin30d = computeShareDaysNearMin(sorted, now);
+
+  return {
+    volatility30d,
+    volatility90d,
+    pricePercentile90d,
+    medianDiscountDepth,
+    medianDiscountCycleDays,
+    shareDaysNearMin30d,
+  };
+}
+
+function coefficientOfVariation(values: number[]): number | null {
+  if (values.length < VOLATILITY_MIN_POINTS) return null;
+  const mean = values.reduce((s, v) => s + v, 0) / values.length;
+  if (mean <= 0) return null;
+  const variance =
+    values.reduce((s, v) => s + (v - mean) * (v - mean), 0) / values.length;
+  return Math.sqrt(variance) / mean;
+}
+
+function percentileRank(values: number[], target: number): number {
+  // Fraction of values strictly less than target plus half of the equal ones —
+  // standard "midrank" definition, robust to plateaus.
+  let below = 0;
+  let equal = 0;
+  for (const v of values) {
+    if (v < target) below += 1;
+    else if (v === target) equal += 1;
+  }
+  return (below + equal / 2) / values.length;
+}
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 0) return (sorted[mid - 1] + sorted[mid]) / 2;
+  return sorted[mid];
+}
+
+function computeShareDaysNearMin(sortedAsc: PricePoint[], now: number): number | null {
+  const startDay = startOfDay(now - 29 * DAY);
+  const buckets = new Map<number, number>();
+  // Carry-forward seed: latest point before window, if any.
+  let carry: number | null = null;
+  for (const p of sortedAsc) {
+    const day = startOfDay(p.timestamp);
+    if (day < startDay) carry = p.price;
+    else break;
+  }
+  for (const p of sortedAsc) {
+    const day = startOfDay(p.timestamp);
+    if (day < startDay) continue;
+    buckets.set(day, p.price); // last write wins (close)
+  }
+  const closes: number[] = [];
+  for (let i = 0; i < 30; i++) {
+    const day = startDay + i * DAY;
+    if (buckets.has(day)) {
+      carry = buckets.get(day)!;
+    }
+    if (carry != null) closes.push(carry);
+  }
+  if (closes.length < 5) return null;
+  const min = Math.min(...closes);
+  if (min <= 0) return null;
+  const within = closes.filter((c) => (c - min) / min <= NEAR_MIN_TOLERANCE).length;
+  return within / closes.length;
+}
+
 export const priceHistory = {
   compute,
   bucketByDay,
   rangeCutoff,
+  computePulse,
 };

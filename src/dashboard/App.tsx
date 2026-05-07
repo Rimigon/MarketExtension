@@ -14,6 +14,7 @@ import { ProductDetail } from './components/ProductDetail';
 import { NotificationsList } from './components/NotificationsList';
 import { NotificationDetail } from './components/NotificationDetail';
 import { StatsPage } from './components/StatsPage';
+import { ParserHealthPage } from './components/ParserHealthPage';
 import { SettingsPage } from './components/SettingsPage';
 import { BulkRefreshToast, type BulkRefreshSummary } from './components/BulkRefreshToast';
 export type { BulkRefreshSummary } from './components/BulkRefreshToast';
@@ -293,7 +294,7 @@ export function App() {
 
   return (
     <div
-      className="grid h-screen w-full bg-slate-50"
+      className="grid h-screen w-full overflow-hidden bg-slate-50"
       style={{ gridTemplateColumns: `240px ${listColumnPx}px minmax(0, 1fr)` }}
     >
       <BulkRefreshToast summary={bulkSummary} onClose={() => setBulkSummary(null)} />
@@ -321,7 +322,10 @@ export function App() {
             setScope({ kind: 'all' });
             setSelectedId(id);
           }}
+          onOpenHealth={() => setScope({ kind: 'health' })}
         />
+      ) : scope.kind === 'health' ? (
+        <ParserHealthPage />
       ) : scope.kind === 'settings' ? (
         <SettingsPage
           onSettingsSaved={() => {

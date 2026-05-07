@@ -8,6 +8,7 @@ import { collectionsRepo } from '@/data/collections.repo';
 import { priceHistory } from '@/services/price-history';
 import { recommendation } from '@/services/recommendation';
 import { stats as statsService } from '@/services/stats';
+import { parserHealth } from '@/services/parser-health';
 import { buildPayload, validatePayload } from '@/services/import-export';
 import type { ImportSummary } from '@/services/import-export';
 import {
@@ -231,11 +232,12 @@ export const handlers: RpcHandlerMap = {
     return { ok: true };
   },
 
-  'stats/overview': async () => {
-    const [active, archived, allPoints] = await Promise.all([
+  'stats/overview': async ({ period }) => {
+    const [active, archived, allPoints, diagnostics] = await Promise.all([
       productsRepo.list({ archived: false }),
       productsRepo.list({ archived: true }),
       db().pricePoints.toArray(),
+      db().parserDiagnostics.toArray(),
     ]);
     const pointsByProduct = new Map<string, PricePoint[]>();
     for (const p of allPoints) {
@@ -243,8 +245,19 @@ export const handlers: RpcHandlerMap = {
       if (arr) arr.push(p);
       else pointsByProduct.set(p.productId, [p]);
     }
-    const overview = statsService.computeOverview({ active, archived, pointsByProduct });
+    const overview = statsService.computeOverview(
+      { active, archived, pointsByProduct, diagnostics },
+      Date.now(),
+      { period: period ?? 7 },
+    );
     return { overview };
+  },
+
+  'parserHealth/get': async () => {
+    const diagnostics = await db().parserDiagnostics.toArray();
+    const products = await productsRepo.list({ archived: false });
+    const report = parserHealth.compute(diagnostics, products);
+    return { report };
   },
 
   'data/export': async () => {

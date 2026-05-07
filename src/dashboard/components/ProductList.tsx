@@ -87,7 +87,7 @@ export function ProductList({
   };
 
   return (
-    <div className="flex h-full flex-col border-r border-slate-200 bg-slate-50">
+    <div className="flex h-full min-h-0 flex-col border-r border-slate-200 bg-slate-50">
       {/* Header zone — each tier gets its own row so controls have breathing
           room and never collapse to a 10-pixel-wide pill. */}
       <div className="border-b border-slate-200 bg-white px-4 pt-4 pb-3">
@@ -167,7 +167,7 @@ export function ProductList({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto bg-slate-50">
+      <div className="flex-1 overflow-y-auto overscroll-contain bg-slate-50">
         {sorted.length === 0 ? (
           <p className="px-4 py-8 text-sm text-slate-500">Ничего не найдено.</p>
         ) : displayMode === 'grid' ? (

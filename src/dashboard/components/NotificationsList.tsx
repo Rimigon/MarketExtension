@@ -37,8 +37,8 @@ export function NotificationsList({
   const hasUnread = notifications.some((n) => n.readAt == null);
 
   return (
-    <div className="flex h-full flex-col border-r border-slate-200">
-      <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
+    <div className="flex h-full min-h-0 flex-col border-r border-slate-200">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
         <h2 className="text-sm font-semibold text-slate-700">Уведомления</h2>
         <div className="flex items-center gap-3 text-xs">
           {hasUnread && (
@@ -53,7 +53,7 @@ export function NotificationsList({
           )}
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto overscroll-contain">
         {notifications.length === 0 ? (
           <p className="px-4 py-8 text-sm text-slate-500">
             Уведомлений ещё нет. Они придут, когда сработает одно из правил —

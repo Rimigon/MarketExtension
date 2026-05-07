@@ -3,7 +3,8 @@ import { sendRpc } from '@/shared/rpc';
 import { formatPrice, formatPercent, formatDateTime } from '@/shared/format';
 import { MARKETPLACE_LABELS } from '@/shared/constants';
 import type { Collection, PricePoint, PriceTier, Product } from '@/shared/types';
-import type { PriceHistoryAggregates } from '@/services/price-history';
+import type { PriceHistoryAggregates, PricePulse } from '@/services/price-history';
+import { computePulse } from '@/services/price-history';
 import { PriceChart } from './PriceChart';
 import type { Range } from '@/services/price-history';
 import { ProductMeta } from './ProductMeta';
@@ -38,6 +39,8 @@ export function ProductDetail({ product, collections, onRemove, onChanged }: Pro
   const [refreshing, setRefreshing] = useState(false);
   const [refreshHint, setRefreshHint] = useState<string | null>(null);
 
+  const pulse = useMemo<PricePulse>(() => computePulse(points), [points]);
+
   const lifetimeTrend = useMemo(() => {
     if (points.length < 2 || product.currentPrice == null) return null;
     const sorted = [...points].sort((a, b) => a.timestamp - b.timestamp);
@@ -63,8 +66,8 @@ export function ProductDetail({ product, collections, onRemove, onChanged }: Pro
   }, [product.id]);
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto bg-slate-50">
-      <header className="flex items-start gap-4 border-b border-slate-200 bg-white px-6 py-5">
+    <div className="flex h-full min-h-0 flex-col bg-slate-50">
+      <header className="flex shrink-0 items-start gap-4 border-b border-slate-200 bg-white px-6 py-5">
         {product.imageUrl ? (
           <img src={product.imageUrl} alt="" className="h-20 w-20 rounded-md object-cover" />
         ) : (
@@ -146,7 +149,7 @@ export function ProductDetail({ product, collections, onRemove, onChanged }: Pro
         </div>
       </header>
 
-      <div className="flex-1 space-y-5 px-6 py-5">
+      <div className="flex-1 space-y-5 overflow-y-auto overscroll-contain px-6 py-5">
         <DetailsBlock product={product} />
 
         {product.description && (
@@ -159,6 +162,8 @@ export function ProductDetail({ product, collections, onRemove, onChanged }: Pro
         )}
 
         <StatsGrid aggregates={aggregates} loading={historyLoading} />
+
+        <PulseBlock pulse={pulse} loading={historyLoading} pointsCount={points.length} />
 
         <PriceChart
           points={points}
@@ -378,6 +383,146 @@ function availabilityLabel(a: string): string {
     default:
       return '—';
   }
+}
+
+function PulseBlock({
+  pulse,
+  loading,
+  pointsCount,
+}: {
+  pulse: PricePulse;
+  loading: boolean;
+  pointsCount: number;
+}) {
+  if (loading) {
+    return (
+      <section className="rounded-lg border border-slate-200 bg-white p-4">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Pulse</h3>
+        <div className="mt-2 h-[68px] animate-pulse rounded bg-slate-50" />
+      </section>
+    );
+  }
+  if (pointsCount < 2) {
+    return null;
+  }
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white p-4">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Pulse</h3>
+      <p className="mt-1 text-xs text-slate-500">
+        Производные метрики из истории цены: насколько товар «живой», где сейчас цена
+        относительно своего коридора, как часто бывают скидки.
+      </p>
+      <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3">
+        <PulseStat
+          label="Волатильность 30д"
+          value={formatVolatility(pulse.volatility30d)}
+          hint={volatilityHint(pulse.volatility30d)}
+          tone={volatilityTone(pulse.volatility30d)}
+        />
+        <PulseStat
+          label="Волатильность 90д"
+          value={formatVolatility(pulse.volatility90d)}
+          tone={volatilityTone(pulse.volatility90d)}
+        />
+        <PulseStat
+          label="Позиция в коридоре 90д"
+          value={formatPercentile(pulse.pricePercentile90d)}
+          hint={percentileHint(pulse.pricePercentile90d)}
+          tone={percentileTone(pulse.pricePercentile90d)}
+        />
+        <PulseStat
+          label="Дней рядом с минимумом · 30д"
+          value={pulse.shareDaysNearMin30d == null ? '—' : formatPercent(pulse.shareDaysNearMin30d)}
+          hint="Доля дней, когда close был в пределах 5% от минимума окна"
+        />
+        <PulseStat
+          label="Медианная глубина скидки"
+          value={pulse.medianDiscountDepth == null ? '—' : formatPercent(pulse.medianDiscountDepth)}
+          hint={
+            pulse.medianDiscountDepth == null
+              ? 'Старая цена в истории не встречалась'
+              : 'По всем точкам, где есть зачёркнутая цена'
+          }
+        />
+        <PulseStat
+          label="Цикл скидок"
+          value={
+            pulse.medianDiscountCycleDays == null
+              ? '—'
+              : `${Math.round(pulse.medianDiscountCycleDays)} дн.`
+          }
+          hint={
+            pulse.medianDiscountCycleDays == null
+              ? 'Нужно ≥ 2 цикла появления скидки'
+              : 'Медианный интервал между появлениями скидки'
+          }
+        />
+      </div>
+    </section>
+  );
+}
+
+function PulseStat({
+  label,
+  value,
+  hint,
+  tone = 'neutral',
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  tone?: Tone;
+}) {
+  const toneClass =
+    tone === 'good' ? 'text-emerald-700' : tone === 'bad' ? 'text-rose-700' : 'text-slate-900';
+  return (
+    <div className="rounded border border-slate-100 bg-slate-50 p-3">
+      <div className="text-xs text-slate-500">{label}</div>
+      <div className={`mt-1 text-base font-semibold ${toneClass}`}>{value}</div>
+      {hint && <div className="mt-0.5 text-xs text-slate-400">{hint}</div>}
+    </div>
+  );
+}
+
+function formatVolatility(cv: number | null): string {
+  if (cv == null) return '—';
+  return formatPercent(cv);
+}
+
+function volatilityHint(cv: number | null): string | undefined {
+  if (cv == null) return undefined;
+  if (cv < 0.02) return 'Очень спокойная';
+  if (cv < 0.05) return 'Низкая';
+  if (cv < 0.1) return 'Умеренная';
+  if (cv < 0.2) return 'Высокая';
+  return 'Сильно колеблется';
+}
+
+function volatilityTone(cv: number | null): Tone {
+  if (cv == null) return 'neutral';
+  if (cv >= 0.1) return 'good'; // волатильность = больше шансов поймать скидку
+  return 'neutral';
+}
+
+function formatPercentile(p: number | null): string {
+  if (p == null) return '—';
+  return formatPercent(p);
+}
+
+function percentileHint(p: number | null): string | undefined {
+  if (p == null) return undefined;
+  if (p < 0.2) return 'Дешевле обычного';
+  if (p < 0.4) return 'Ниже середины';
+  if (p < 0.6) return 'Около середины';
+  if (p < 0.8) return 'Выше середины';
+  return 'Дороже обычного';
+}
+
+function percentileTone(p: number | null): Tone {
+  if (p == null) return 'neutral';
+  if (p < 0.25) return 'good';
+  if (p > 0.75) return 'bad';
+  return 'neutral';
 }
 
 function parserStatusLabel(s: string): string {

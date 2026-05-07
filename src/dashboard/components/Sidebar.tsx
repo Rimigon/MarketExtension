@@ -10,6 +10,7 @@ export type ScopeFilter =
   | { kind: 'archived' }
   | { kind: 'notifications' }
   | { kind: 'stats' }
+  | { kind: 'health' }
   | { kind: 'settings' }
   | { kind: 'collection'; id: string };
 
@@ -73,7 +74,7 @@ export function Sidebar({
   }
 
   return (
-    <aside className="flex h-full flex-col overflow-y-auto border-r border-slate-200 bg-slate-50 px-4 py-6">
+    <aside className="flex h-full flex-col overflow-y-auto overscroll-contain border-r border-slate-200 bg-slate-50 px-4 py-6">
       <div className="flex items-center justify-between px-2">
         <span className="text-lg font-semibold text-slate-900">PriceWatch</span>
       </div>
@@ -101,6 +102,11 @@ export function Sidebar({
           label={t('sidebar.stats')}
           active={scope.kind === 'stats'}
           onClick={() => onScopeChange({ kind: 'stats' })}
+        />
+        <ScopeButton
+          label="Здоровье парсеров"
+          active={scope.kind === 'health'}
+          onClick={() => onScopeChange({ kind: 'health' })}
         />
         <ScopeButton
           label={t('sidebar.notifications')}

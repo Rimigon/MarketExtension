@@ -6,6 +6,7 @@ import { settingsRepo } from '@/data/settings.repo';
 import { setLocale } from '@/shared/i18n';
 import { refreshBadge, registerNotificationClick } from './notifier';
 import { startScheduler } from './scheduler';
+import { registerMaintenanceAlarm, startMaintenance } from './maintenance';
 
 console.log('[PriceWatch] background service worker booted at', new Date().toISOString());
 
@@ -13,6 +14,7 @@ console.log('[PriceWatch] background service worker booted at', new Date().toISO
 // notification click. Registering inside the async bootstrap() means the
 // listener is attached after the click event has already fired on a cold SW.
 registerNotificationClick();
+registerMaintenanceAlarm();
 
 void bootstrap();
 
@@ -26,6 +28,7 @@ async function bootstrap(): Promise<void> {
     if (settings.scheduledUpdates) {
       await startScheduler();
     }
+    await startMaintenance();
   } catch (err) {
     console.warn('[PriceWatch] bootstrap failed', err);
   }

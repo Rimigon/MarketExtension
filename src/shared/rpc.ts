@@ -11,7 +11,8 @@ import type {
 } from './types';
 import type { PriceHistoryAggregates } from '@/services/price-history';
 import type { Recommendation } from '@/services/recommendation';
-import type { StatsOverview } from '@/services/stats';
+import type { StatsOverview, StatsPeriodDays } from '@/services/stats';
+import type { ParserHealthReport } from '@/services/parser-health';
 import type { ExportPayload, ImportSummary } from '@/services/import-export';
 
 /**
@@ -104,8 +105,12 @@ export type RpcMap = {
     response: { ok: true };
   };
   'stats/overview': {
-    request: Record<string, never>;
+    request: { period?: StatsPeriodDays };
     response: { overview: StatsOverview };
+  };
+  'parserHealth/get': {
+    request: Record<string, never>;
+    response: { report: ParserHealthReport };
   };
   'data/export': {
     request: Record<string, never>;

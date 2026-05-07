@@ -67,10 +67,10 @@ describe('computeOverview', () => {
       ['b', [pt('b', 1000, 10), pt('b', 1500, 0)]],
     ]);
     const overview = computeOverview({ active: [a, b], archived: [], pointsByProduct: points }, NOW);
-    expect(overview.drops7dCount).toBe(1);
-    expect(overview.rises7dCount).toBe(1);
-    expect(overview.topDrops7d[0].productId).toBe('a');
-    expect(overview.topRises7d[0].productId).toBe('b');
+    expect(overview.dropsCount).toBe(1);
+    expect(overview.risesCount).toBe(1);
+    expect(overview.topDrops[0].productId).toBe('a');
+    expect(overview.topRises[0].productId).toBe('b');
   });
 
   it('computes potential savings against historical minimum', () => {
@@ -80,6 +80,96 @@ describe('computeOverview', () => {
     ]);
     const overview = computeOverview({ active: [a], archived: [], pointsByProduct: points }, NOW);
     expect(overview.potentialSavings).toBe(500);
+  });
+
+  it('honors a custom period for top movers', () => {
+    const a = product({ id: 'a', currentPrice: 800 });
+    const points = new Map<string, PricePoint[]>([
+      ['a', [pt('a', 1000, 60), pt('a', 1000, 5), pt('a', 800, 0)]],
+    ]);
+    // 7-day period: ref is at 5d (price 1000) — drop registered.
+    const o7 = computeOverview({ active: [a], archived: [], pointsByProduct: points }, NOW, { period: 7 });
+    expect(o7.dropsCount).toBe(1);
+    expect(o7.period).toBe(7);
+    // 90-day period: ref is at 60d (price 1000) — same drop registered.
+    const o90 = computeOverview({ active: [a], archived: [], pointsByProduct: points }, NOW, { period: 90 });
+    expect(o90.dropsCount).toBe(1);
+    expect(o90.period).toBe(90);
+  });
+
+  it('flags products near the historical minimum', () => {
+    const cheap = product({ id: 'cheap', currentPrice: 1010 }); // 1% above min 1000
+    const farFromMin = product({ id: 'far', currentPrice: 1500 }); // 50% above min
+    const points = new Map<string, PricePoint[]>([
+      ['cheap', [pt('cheap', 1000, 30), pt('cheap', 1010, 0)]],
+      ['far', [pt('far', 1000, 30), pt('far', 1500, 0)]],
+    ]);
+    const overview = computeOverview(
+      { active: [cheap, farFromMin], archived: [], pointsByProduct: points },
+      NOW,
+    );
+    expect(overview.nearMinimum).toHaveLength(1);
+    expect(overview.nearMinimum[0].productId).toBe('cheap');
+    expect(overview.nearMinimum[0].distancePct).toBeCloseTo(0.01);
+  });
+
+  it('flags products close to (or below) the user goal', () => {
+    const reached = product({
+      id: 'reached',
+      currentPrice: 950,
+      goal: { targetPrice: 1000 },
+    });
+    const close = product({
+      id: 'close',
+      currentPrice: 1030,
+      goal: { targetPrice: 1000 },
+    });
+    const farFromGoal = product({
+      id: 'far',
+      currentPrice: 2000,
+      goal: { targetPrice: 1000 },
+    });
+    const noGoal = product({ id: 'no-goal', currentPrice: 100 });
+    const overview = computeOverview(
+      {
+        active: [reached, close, farFromGoal, noGoal],
+        archived: [],
+        pointsByProduct: new Map(),
+      },
+      NOW,
+    );
+    const ids = overview.nearGoal.map((p) => p.productId);
+    expect(ids).toContain('reached');
+    expect(ids).toContain('close');
+    expect(ids).not.toContain('far');
+    expect(ids).not.toContain('no-goal');
+    // Reached one comes first (negative distance).
+    expect(overview.nearGoal[0].productId).toBe('reached');
+    expect(overview.nearGoal[0].distancePct).toBeLessThan(0);
+  });
+
+  it('summarizes parser health from diagnostics', () => {
+    const diagnostics = [
+      { id: '1', marketplace: 'ozon' as const, parserVersion: 1, status: 'ok' as const, url: '', missingFields: [], timestamp: NOW - 1 * HOUR },
+      { id: '2', marketplace: 'ozon' as const, parserVersion: 1, status: 'failed' as const, url: '', missingFields: [], timestamp: NOW - 2 * HOUR },
+      { id: '3', marketplace: 'wildberries' as const, parserVersion: 1, status: 'ok' as const, url: '', missingFields: [], timestamp: NOW - 1 * DAY },
+      { id: 'old', marketplace: 'ozon' as const, parserVersion: 1, status: 'failed' as const, url: '', missingFields: [], timestamp: NOW - 30 * DAY },
+    ];
+    const overview = computeOverview(
+      {
+        active: [],
+        archived: [],
+        pointsByProduct: new Map(),
+        diagnostics,
+      },
+      NOW,
+    );
+    expect(overview.parserHealth.byMarketplace.ozon.total).toBe(2);
+    expect(overview.parserHealth.byMarketplace.ozon.failed).toBe(1);
+    expect(overview.parserHealth.byMarketplace.wildberries.ok).toBe(1);
+    expect(overview.parserHealth.failures7d).toBe(1); // old diag excluded
+    // 2 ok / 3 total in window.
+    expect(overview.parserHealth.overallSuccessRate).toBeCloseTo(2 / 3);
   });
 
   it('counts stale products older than 7 days', () => {

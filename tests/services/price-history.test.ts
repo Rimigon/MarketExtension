@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bucketByDay, compute, rangeCutoff } from '@/services/price-history';
+import { bucketByDay, compute, computePulse, rangeCutoff } from '@/services/price-history';
 import type { PricePoint } from '@/shared/types';
 
 const HOUR = 60 * 60 * 1000;
@@ -158,5 +158,74 @@ describe('priceHistory.rangeCutoff', () => {
     expect(c7).toBeGreaterThan(c30);
     expect(c30).toBeGreaterThan(c90);
     expect(now - c7).toBe(7 * DAY);
+  });
+});
+
+describe('computePulse', () => {
+  const NOW = 1_700_000_000_000;
+
+  it('returns nulls everywhere for an empty series', () => {
+    const p = computePulse([], NOW);
+    expect(p.volatility30d).toBeNull();
+    expect(p.volatility90d).toBeNull();
+    expect(p.pricePercentile90d).toBeNull();
+    expect(p.medianDiscountDepth).toBeNull();
+    expect(p.medianDiscountCycleDays).toBeNull();
+    expect(p.shareDaysNearMin30d).toBeNull();
+  });
+
+  it('detects low volatility for a flat price', () => {
+    const series = [
+      point(1000, NOW - 20 * DAY),
+      point(1000, NOW - 10 * DAY),
+      point(1000, NOW),
+    ];
+    const p = computePulse(series, NOW);
+    expect(p.volatility30d).toBe(0);
+  });
+
+  it('detects high volatility on swings', () => {
+    const series = [
+      point(500, NOW - 25 * DAY),
+      point(1500, NOW - 15 * DAY),
+      point(800, NOW - 5 * DAY),
+      point(1200, NOW),
+    ];
+    const p = computePulse(series, NOW);
+    expect(p.volatility30d).not.toBeNull();
+    expect(p.volatility30d!).toBeGreaterThan(0.2);
+  });
+
+  it('places current price near the bottom of percentile range when at the min', () => {
+    const series = [
+      point(1500, NOW - 80 * DAY),
+      point(1300, NOW - 60 * DAY),
+      point(1200, NOW - 40 * DAY),
+      point(1100, NOW - 20 * DAY),
+      point(1000, NOW - 5 * DAY),
+      point(900, NOW), // current is the lowest
+    ];
+    const p = computePulse(series, NOW);
+    expect(p.pricePercentile90d).not.toBeNull();
+    expect(p.pricePercentile90d!).toBeLessThan(0.2);
+  });
+
+  it('reports median discount depth and cycle', () => {
+    // Three discount-appearance transitions, 7 days apart, with 25% / 30% / 20% depths.
+    const series: PricePoint[] = [
+      point(1000, NOW - 30 * DAY, { oldPrice: null }), // baseline
+      point(750, NOW - 23 * DAY, { oldPrice: 1000 }), // discount appears (25%)
+      point(900, NOW - 20 * DAY, { oldPrice: null }), // discount cleared
+      point(700, NOW - 16 * DAY, { oldPrice: 1000 }), // discount appears again (30%)
+      point(900, NOW - 13 * DAY, { oldPrice: null }), // cleared
+      point(800, NOW - 9 * DAY, { oldPrice: 1000 }), // discount appears third time (20%)
+    ];
+    const p = computePulse(series, NOW);
+    expect(p.medianDiscountDepth).not.toBeNull();
+    // Median of [0.25, 0.30, 0.20] = 0.25
+    expect(p.medianDiscountDepth!).toBeCloseTo(0.25, 2);
+    expect(p.medianDiscountCycleDays).not.toBeNull();
+    // Two intervals: 7d and 7d → median = 7
+    expect(p.medianDiscountCycleDays!).toBeCloseTo(7, 0);
   });
 });
