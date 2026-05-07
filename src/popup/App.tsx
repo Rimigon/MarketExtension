@@ -3,6 +3,8 @@ import { sendRpc } from '@/shared/rpc';
 import { canonicalizeUrl, detectMarketplace } from '@/shared/url';
 import { formatPrice, formatDateTime } from '@/shared/format';
 import { MARKETPLACE_LABELS } from '@/shared/constants';
+import { resolveThemeId } from '@/shared/themes';
+import { SchedulerHint } from '@/dashboard/components/SchedulerHint';
 import type { AppNotification, Product } from '@/shared/types';
 
 type TabState =
@@ -19,13 +21,37 @@ const ADD_ERROR_LABELS: Record<string, string> = {
 
 export function App() {
   const [tab, setTab] = useState<TabState>({ kind: 'loading' });
-  const [recent, setRecent] = useState<Product[]>([]);
+  const [tracked, setTracked] = useState<Product[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [addError, setAddError] = useState<string | null>(null);
   const [refreshingIds, setRefreshingIds] = useState<Set<string>>(() => new Set());
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
   const [bulkSummary, setBulkSummary] = useState<{ ok: number; fail: number; changes: number } | null>(null);
+  const [productSearch, setProductSearch] = useState('');
+  const [refreshBump, setRefreshBump] = useState(0);
+
+  // Apply the user's chosen theme to the popup root as well, so light/dark
+  // themes are consistent across the popup, options page and dashboard.
+  useEffect(() => {
+    let cancelled = false;
+    const applyFromSettings = async () => {
+      try {
+        const resp = await sendRpc('settings/get', {});
+        if (cancelled) return;
+        document.documentElement.setAttribute(
+          'data-theme',
+          resolveThemeId(resp.settings.theme),
+        );
+      } catch {
+        // SW asleep on first open — fall back to default until refresh().
+      }
+    };
+    void applyFromSettings();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     void refresh();
@@ -50,8 +76,10 @@ export function App() {
         if (product) setTab({ kind: 'tracked', product, tabId: activeTab.id, url: activeTab.url });
         else setTab({ kind: 'untracked', tabId: activeTab.id, url: activeTab.url });
       }
-      const { products } = await sendRpc('product/list', { limit: 5 });
-      setRecent(products);
+      // Show every actively-tracked product (not just a slice). The list is
+      // virtually-scrollable in the popup body, so volume isn't an issue.
+      const { products } = await sendRpc('product/list', { archived: false });
+      setTracked(products);
       const [notes, unread] = await Promise.all([
         sendRpc('notifications/list', { limit: 5 }),
         sendRpc('notifications/unreadCount', {}),
@@ -114,6 +142,18 @@ export function App() {
     chrome.tabs.create({ url });
   }
 
+  async function openProductInDashboard(productId: string) {
+    // Try to reuse an existing dashboard tab via the SW; fall back to a fresh
+    // tab if the SW is asleep / RPC fails (mirrors openNotification below).
+    try {
+      await sendRpc('dashboard/open', { productId });
+    } catch {
+      const base = chrome.runtime.getURL('src/dashboard/index.html');
+      chrome.tabs.create({ url: `${base}#product/${encodeURIComponent(productId)}` });
+    }
+    window.close();
+  }
+
   async function openNotification(id?: string) {
     try {
       await sendRpc('dashboard/open', id ? { notificationId: id } : {});
@@ -127,6 +167,17 @@ export function App() {
 
   async function markAllNotificationsRead() {
     await sendRpc('notifications/markAllRead', {});
+    refresh();
+  }
+
+  async function removeNotification(id: string) {
+    await sendRpc('notifications/remove', { id });
+    refresh();
+  }
+
+  async function removeAllNotifications() {
+    if (!confirm(`Удалить все уведомления (${notifications.length})?`)) return;
+    await sendRpc('notifications/removeAll', {});
     refresh();
   }
 
@@ -160,27 +211,31 @@ export function App() {
     }
     setBulkProgress(null);
     setBulkSummary({ ok, fail, changes });
+    setRefreshBump((n) => n + 1);
     refresh();
   }
 
   return (
     <div className="p-4 space-y-4">
-      <header className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">PriceWatch</h1>
-        <div className="flex items-center gap-3">
-          <button
-            className="text-xs text-brand-500 hover:underline"
-            onClick={openDashboard}
-          >
-            Dashboard
-          </button>
-          <button
-            className="text-xs text-slate-500 hover:underline"
-            onClick={() => chrome.runtime.openOptionsPage()}
-          >
-            Настройки
-          </button>
+      <header className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h1 className="text-lg font-semibold">PriceWatch</h1>
+          <div className="flex items-center gap-3">
+            <button
+              className="text-xs text-brand-500 hover:underline"
+              onClick={openDashboard}
+            >
+              Dashboard
+            </button>
+            <button
+              className="text-xs text-slate-500 hover:underline"
+              onClick={() => chrome.runtime.openOptionsPage()}
+            >
+              Настройки
+            </button>
+          </div>
         </div>
+        <SchedulerHint bump={refreshBump} variant="pill" />
       </header>
 
       <section>
@@ -269,6 +324,15 @@ export function App() {
                 Прочитать всё
               </button>
             )}
+            {notifications.length > 0 && (
+              <button
+                type="button"
+                onClick={() => void removeAllNotifications()}
+                className="text-rose-600 hover:underline"
+              >
+                Удалить всё
+              </button>
+            )}
             <button
               type="button"
               onClick={() => void openNotification()}
@@ -285,17 +349,20 @@ export function App() {
             {notifications.slice(0, 3).map((n) => {
               const unread = n.readAt == null;
               const isGlobal = n.productId === '_global';
-              const product = !isGlobal ? recent.find((p) => p.id === n.productId) : undefined;
+              const product = !isGlobal ? tracked.find((p) => p.id === n.productId) : undefined;
               return (
-                <li key={n.id}>
+                <li
+                  key={n.id}
+                  className={`group relative flex items-start gap-2 rounded-md border p-2 text-sm transition ${
+                    unread
+                      ? 'border-brand-200 bg-brand-50/50 hover:border-brand-300'
+                      : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                  }`}
+                >
                   <button
                     type="button"
                     onClick={() => void openNotification(n.id)}
-                    className={`flex w-full items-start gap-2 rounded-md border p-2 text-left text-sm transition ${
-                      unread
-                        ? 'border-brand-200 bg-brand-50/50 hover:border-brand-300'
-                        : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                    }`}
+                    className="flex min-w-0 flex-1 items-start gap-2 text-left"
                   >
                     {isGlobal ? (
                       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-brand-50 text-brand-500">
@@ -329,6 +396,17 @@ export function App() {
                       </div>
                     </div>
                   </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void removeNotification(n.id);
+                    }}
+                    title="Удалить уведомление"
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-slate-300 hover:bg-rose-50 hover:text-rose-600"
+                  >
+                    <PopupIcon name="close" />
+                  </button>
                 </li>
               );
             })}
@@ -337,73 +415,111 @@ export function App() {
       </section>
 
       <section>
-        <h2 className="text-xs font-semibold uppercase text-slate-500">Последние</h2>
-        {recent.length === 0 ? (
+        <div className="flex items-baseline justify-between">
+          <h2 className="text-xs font-semibold uppercase text-slate-500">
+            Отслеживаемые
+            <span className="ml-1.5 text-[10px] font-normal text-slate-400">
+              {tracked.length}
+            </span>
+          </h2>
+        </div>
+        {tracked.length === 0 ? (
           <p className="mt-2 text-sm text-slate-500">Пока нет отслеживаемых товаров.</p>
         ) : (
-          <ul className="mt-2 space-y-2">
-            {recent.map((p) => {
-              const isRefreshing = refreshingIds.has(p.id);
-              return (
-                <li key={p.id} className="rounded-md border border-slate-200 p-2 text-sm">
-                  <div className="flex items-start gap-2">
-                    {p.imageUrl && (
-                      <img src={p.imageUrl} alt="" className="h-10 w-10 shrink-0 rounded object-cover" />
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <a
-                        href={p.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="line-clamp-2 text-slate-900 hover:underline"
+          <>
+            {tracked.length > 5 && (
+              <input
+                type="search"
+                placeholder="Поиск…"
+                value={productSearch}
+                onChange={(e) => setProductSearch(e.target.value)}
+                className="mt-2 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs placeholder:text-slate-400 focus:border-brand-500 focus:outline-none"
+              />
+            )}
+            <ul className="mt-2 max-h-[320px] space-y-2 overflow-y-auto pr-1">
+              {filterProducts(tracked, productSearch).map((p) => {
+                const isRefreshing = refreshingIds.has(p.id);
+                return (
+                  <li
+                    key={p.id}
+                    className="rounded-md border border-slate-200 p-2 text-sm transition hover:border-slate-300 hover:bg-slate-50"
+                  >
+                    <div className="flex items-start gap-2">
+                      {p.imageUrl ? (
+                        <img
+                          src={p.imageUrl}
+                          alt=""
+                          className="h-10 w-10 shrink-0 rounded object-cover"
+                        />
+                      ) : (
+                        <div className="h-10 w-10 shrink-0 rounded bg-slate-100" />
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => void openProductInDashboard(p.id)}
+                        className="min-w-0 flex-1 text-left"
+                        title="Открыть в Dashboard"
                       >
-                        {p.title}
-                      </a>
-                      <div className="mt-0.5 text-xs text-slate-500">
-                        {MARKETPLACE_LABELS[p.marketplace]} · {formatPrice(p.currentPrice)} ·{' '}
-                        {formatDateTime(p.updatedAt)}
+                        <span className="line-clamp-2 text-slate-900 hover:underline">
+                          {p.title}
+                        </span>
+                        <span className="mt-0.5 block text-xs text-slate-500">
+                          {MARKETPLACE_LABELS[p.marketplace]} ·{' '}
+                          {formatPrice(p.currentPrice)} · {formatDateTime(p.updatedAt)}
+                        </span>
+                      </button>
+                      <div className="flex shrink-0 items-center gap-0.5">
+                        <a
+                          href={p.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          title="Открыть на маркетплейсе"
+                          className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                        >
+                          <PopupIcon name="open" />
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => void refreshProduct(p.id)}
+                          disabled={isRefreshing}
+                          title="Обновить цену"
+                          className={`flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50 ${
+                            isRefreshing ? 'text-brand-500' : ''
+                          }`}
+                        >
+                          <PopupIcon name="refresh" spinning={isRefreshing} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (confirm(`Удалить «${p.title}»?`)) void remove(p.id);
+                          }}
+                          title="Удалить"
+                          className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                        >
+                          <PopupIcon name="trash" />
+                        </button>
                       </div>
                     </div>
-                    <div className="flex shrink-0 items-center gap-0.5">
-                      <a
-                        href={p.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        title="Открыть"
-                        className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                      >
-                        <PopupIcon name="open" />
-                      </a>
-                      <button
-                        type="button"
-                        onClick={() => void refreshProduct(p.id)}
-                        disabled={isRefreshing}
-                        title="Обновить цену"
-                        className={`flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50 ${
-                          isRefreshing ? 'text-brand-500' : ''
-                        }`}
-                      >
-                        <PopupIcon name="refresh" spinning={isRefreshing} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (confirm(`Удалить «${p.title}»?`)) void remove(p.id);
-                        }}
-                        title="Удалить"
-                        className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-rose-50 hover:text-rose-600"
-                      >
-                        <PopupIcon name="trash" />
-                      </button>
-                    </div>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
+                  </li>
+                );
+              })}
+            </ul>
+          </>
         )}
       </section>
     </div>
+  );
+}
+
+function filterProducts(products: Product[], q: string): Product[] {
+  const needle = q.trim().toLowerCase();
+  if (!needle) return products;
+  return products.filter(
+    (p) =>
+      p.title.toLowerCase().includes(needle) ||
+      (p.brand?.toLowerCase().includes(needle) ?? false) ||
+      (p.sku?.toLowerCase().includes(needle) ?? false),
   );
 }
 
@@ -411,7 +527,7 @@ function PopupIcon({
   name,
   spinning = false,
 }: {
-  name: 'open' | 'refresh' | 'trash';
+  name: 'open' | 'refresh' | 'trash' | 'close';
   spinning?: boolean;
 }) {
   const common = {
@@ -432,6 +548,14 @@ function PopupIcon({
         <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
         <polyline points="15 3 21 3 21 9" />
         <line x1="10" y1="14" x2="21" y2="3" />
+      </svg>
+    );
+  }
+  if (name === 'close') {
+    return (
+      <svg {...common}>
+        <line x1="18" y1="6" x2="6" y2="18" />
+        <line x1="6" y1="6" x2="18" y2="18" />
       </svg>
     );
   }

@@ -63,7 +63,7 @@ export function ProductDetail({ product, collections, onRemove, onChanged }: Pro
   }, [product.id]);
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto">
+    <div className="flex h-full flex-col overflow-y-auto bg-slate-50">
       <header className="flex items-start gap-4 border-b border-slate-200 bg-white px-6 py-5">
         {product.imageUrl ? (
           <img src={product.imageUrl} alt="" className="h-20 w-20 rounded-md object-cover" />

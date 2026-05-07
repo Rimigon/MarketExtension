@@ -2,14 +2,330 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
+/* ==========================================================================
+   Theme tokens. Each [data-theme="..."] block redefines the same set of
+   custom properties; the override blocks below remap a small set of
+   commonly-used Tailwind utility classes to those tokens so the rest of the
+   app keeps using familiar utilities (bg-white, text-slate-900, …) without
+   per-component theme branching.
+   ========================================================================== */
+
+:root,
+[data-theme='light-default'] {
   color-scheme: light;
+  --pw-bg-app: #f8fafc;       /* page / canvas */
+  --pw-bg-panel: #ffffff;     /* cards, headers */
+  --pw-bg-soft: #f1f5f9;      /* hover, subdued */
+  --pw-bg-active: #eef6ff;    /* selected row */
+  --pw-bg-overlay: #ffffff;   /* tooltips, popovers */
+  --pw-border: #e2e8f0;
+  --pw-border-soft: #f1f5f9;
+  --pw-text-primary: #0f172a;
+  --pw-text-secondary: #475569;
+  --pw-text-muted: #64748b;
+  --pw-text-faint: #94a3b8;
+  --pw-text-ghost: #cbd5e1;
+  --pw-accent: #2563eb;
+  --pw-accent-strong: #1d4ed8;
+  --pw-accent-soft: #eef6ff;
+  --pw-accent-text: #1d4ed8;
 }
 
-html, body {
-  background: #ffffff;
+[data-theme='light-cream'] {
+  color-scheme: light;
+  --pw-bg-app: #fdf8ee;
+  --pw-bg-panel: #fffaf0;
+  --pw-bg-soft: #f7eedb;
+  --pw-bg-active: #fbe7c2;
+  --pw-bg-overlay: #fffaf0;
+  --pw-border: #ead8b5;
+  --pw-border-soft: #f3e6c5;
+  --pw-text-primary: #3a2a14;
+  --pw-text-secondary: #6b4d28;
+  --pw-text-muted: #8a6a44;
+  --pw-text-faint: #a98c63;
+  --pw-text-ghost: #d6c39a;
+  --pw-accent: #b25c00;
+  --pw-accent-strong: #8e4500;
+  --pw-accent-soft: #fbe7c2;
+  --pw-accent-text: #7a3d00;
+}
+
+[data-theme='light-mint'] {
+  color-scheme: light;
+  --pw-bg-app: #ecfdf5;
+  --pw-bg-panel: #ffffff;
+  --pw-bg-soft: #d1fae5;
+  --pw-bg-active: #b2f0d6;
+  --pw-bg-overlay: #ffffff;
+  --pw-border: #a7f3d0;
+  --pw-border-soft: #d1fae5;
+  --pw-text-primary: #064e3b;
+  --pw-text-secondary: #115e4a;
+  --pw-text-muted: #2f7e6a;
+  --pw-text-faint: #6ba996;
+  --pw-text-ghost: #a7d4c2;
+  --pw-accent: #0d9488;
+  --pw-accent-strong: #115e59;
+  --pw-accent-soft: #d1fae5;
+  --pw-accent-text: #115e59;
+}
+
+[data-theme='light-sky'] {
+  color-scheme: light;
+  --pw-bg-app: #f0f9ff;
+  --pw-bg-panel: #ffffff;
+  --pw-bg-soft: #e0f2fe;
+  --pw-bg-active: #bae6fd;
+  --pw-bg-overlay: #ffffff;
+  --pw-border: #bae6fd;
+  --pw-border-soft: #e0f2fe;
+  --pw-text-primary: #0c2740;
+  --pw-text-secondary: #1e4361;
+  --pw-text-muted: #3b6783;
+  --pw-text-faint: #6f93ad;
+  --pw-text-ghost: #b9cfdf;
+  --pw-accent: #0284c7;
+  --pw-accent-strong: #075985;
+  --pw-accent-soft: #e0f2fe;
+  --pw-accent-text: #075985;
+}
+
+[data-theme='light-rose'] {
+  color-scheme: light;
+  --pw-bg-app: #fff1f2;
+  --pw-bg-panel: #ffffff;
+  --pw-bg-soft: #ffe4e6;
+  --pw-bg-active: #fecdd3;
+  --pw-bg-overlay: #ffffff;
+  --pw-border: #fecdd3;
+  --pw-border-soft: #ffe4e6;
+  --pw-text-primary: #4c0519;
+  --pw-text-secondary: #6b1532;
+  --pw-text-muted: #903350;
+  --pw-text-faint: #b97388;
+  --pw-text-ghost: #e2bcc6;
+  --pw-accent: #e11d48;
+  --pw-accent-strong: #9f1239;
+  --pw-accent-soft: #ffe4e6;
+  --pw-accent-text: #9f1239;
+}
+
+[data-theme='dark-slate'] {
+  color-scheme: dark;
+  --pw-bg-app: #0f172a;
+  --pw-bg-panel: #1e293b;
+  --pw-bg-soft: #273449;
+  --pw-bg-active: #2c3d5e;
+  --pw-bg-overlay: #1e293b;
+  --pw-border: #334155;
+  --pw-border-soft: #1e293b;
+  --pw-text-primary: #f8fafc;
+  --pw-text-secondary: #cbd5e1;
+  --pw-text-muted: #94a3b8;
+  --pw-text-faint: #64748b;
+  --pw-text-ghost: #475569;
+  --pw-accent: #60a5fa;
+  --pw-accent-strong: #93c5fd;
+  --pw-accent-soft: #1e3a8a;
+  --pw-accent-text: #bfdbfe;
+}
+
+[data-theme='dark-midnight'] {
+  color-scheme: dark;
+  --pw-bg-app: #0b1220;
+  --pw-bg-panel: #131c2e;
+  --pw-bg-soft: #1c2640;
+  --pw-bg-active: #233055;
+  --pw-bg-overlay: #131c2e;
+  --pw-border: #233055;
+  --pw-border-soft: #1c2640;
+  --pw-text-primary: #e6edf7;
+  --pw-text-secondary: #b9c4d8;
+  --pw-text-muted: #8290ad;
+  --pw-text-faint: #5a6885;
+  --pw-text-ghost: #3e4862;
+  --pw-accent: #7aa2ff;
+  --pw-accent-strong: #a8c0ff;
+  --pw-accent-soft: #1f2c5a;
+  --pw-accent-text: #cdd9ff;
+}
+
+[data-theme='dark-forest'] {
+  color-scheme: dark;
+  --pw-bg-app: #0f1f17;
+  --pw-bg-panel: #16291f;
+  --pw-bg-soft: #1d3527;
+  --pw-bg-active: #244432;
+  --pw-bg-overlay: #16291f;
+  --pw-border: #2b4838;
+  --pw-border-soft: #1d3527;
+  --pw-text-primary: #e7f4eb;
+  --pw-text-secondary: #c0d9c8;
+  --pw-text-muted: #8baf99;
+  --pw-text-faint: #5e7c6a;
+  --pw-text-ghost: #3d5448;
+  --pw-accent: #34d399;
+  --pw-accent-strong: #6ee7b7;
+  --pw-accent-soft: #1f4f3a;
+  --pw-accent-text: #a7f3d0;
+}
+
+[data-theme='dark-violet'] {
+  color-scheme: dark;
+  --pw-bg-app: #1a132d;
+  --pw-bg-panel: #261c40;
+  --pw-bg-soft: #2f2452;
+  --pw-bg-active: #3a2c66;
+  --pw-bg-overlay: #261c40;
+  --pw-border: #3a2c66;
+  --pw-border-soft: #2f2452;
+  --pw-text-primary: #f0eafd;
+  --pw-text-secondary: #cdc1e9;
+  --pw-text-muted: #9c8ec5;
+  --pw-text-faint: #6e6291;
+  --pw-text-ghost: #4a4067;
+  --pw-accent: #a78bfa;
+  --pw-accent-strong: #c4b5fd;
+  --pw-accent-soft: #3d2d6b;
+  --pw-accent-text: #ddd6fe;
+}
+
+[data-theme='dark-amber'] {
+  color-scheme: dark;
+  --pw-bg-app: #1f1810;
+  --pw-bg-panel: #2b2018;
+  --pw-bg-soft: #3a2c20;
+  --pw-bg-active: #4a3826;
+  --pw-bg-overlay: #2b2018;
+  --pw-border: #4a3826;
+  --pw-border-soft: #3a2c20;
+  --pw-text-primary: #fbf5e8;
+  --pw-text-secondary: #e2d3b3;
+  --pw-text-muted: #b69a6b;
+  --pw-text-faint: #826c47;
+  --pw-text-ghost: #574631;
+  --pw-accent: #f59e0b;
+  --pw-accent-strong: #fbbf24;
+  --pw-accent-soft: #4a3110;
+  --pw-accent-text: #fcd34d;
+}
+
+/* Apply tokens to the global page surface. */
+html,
+body {
+  background: var(--pw-bg-app);
+  color: var(--pw-text-primary);
 }
 
 body {
-  @apply font-sans text-slate-900 bg-white antialiased;
+  @apply font-sans antialiased;
+}
+
+/* ==========================================================================
+   Surface remap: in any non-default theme, neutral Tailwind utilities used
+   as surfaces / borders / text are remapped to theme tokens. We only target
+   the small set of slate utilities used as “neutral” colors throughout the
+   app — vivid colors (rose, emerald, amber, brand) are intentionally left
+   alone so badges and status chips keep their meaning.
+   ========================================================================== */
+
+[data-theme] .bg-white,
+[data-theme] .hover\:bg-white:hover {
+  background-color: var(--pw-bg-panel);
+}
+
+[data-theme] .bg-slate-50,
+[data-theme] .hover\:bg-slate-50:hover {
+  background-color: var(--pw-bg-app);
+}
+
+[data-theme] .bg-slate-50\/40 {
+  background-color: var(--pw-bg-app);
+}
+
+[data-theme] .bg-slate-50\/50 {
+  background-color: var(--pw-bg-soft);
+}
+
+[data-theme] .bg-slate-100,
+[data-theme] .hover\:bg-slate-100:hover {
+  background-color: var(--pw-bg-soft);
+}
+
+[data-theme] .bg-slate-200,
+[data-theme] .hover\:bg-slate-200:hover {
+  background-color: var(--pw-bg-active);
+}
+
+[data-theme] .bg-brand-50,
+[data-theme] .hover\:bg-brand-50:hover {
+  background-color: var(--pw-accent-soft);
+}
+
+[data-theme] .text-slate-900 { color: var(--pw-text-primary); }
+[data-theme] .text-slate-800 { color: var(--pw-text-primary); }
+[data-theme] .text-slate-700 { color: var(--pw-text-secondary); }
+[data-theme] .text-slate-600 { color: var(--pw-text-secondary); }
+[data-theme] .text-slate-500 { color: var(--pw-text-muted); }
+[data-theme] .text-slate-400 { color: var(--pw-text-faint); }
+[data-theme] .text-slate-300 { color: var(--pw-text-ghost); }
+
+[data-theme] .border-slate-200 { border-color: var(--pw-border); }
+[data-theme] .border-slate-300 { border-color: var(--pw-border); }
+[data-theme] .border-slate-100 { border-color: var(--pw-border-soft); }
+[data-theme] .divide-slate-100 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--pw-border-soft);
+}
+
+[data-theme] .placeholder\:text-slate-400::placeholder { color: var(--pw-text-faint); }
+
+[data-theme] .text-brand-500 { color: var(--pw-accent); }
+[data-theme] .text-brand-600 { color: var(--pw-accent-strong); }
+[data-theme] .text-brand-700 { color: var(--pw-accent-text); }
+[data-theme] .bg-brand-500 { background-color: var(--pw-accent); }
+[data-theme] .bg-brand-600 { background-color: var(--pw-accent-strong); }
+[data-theme] .hover\:bg-brand-600:hover { background-color: var(--pw-accent-strong); }
+[data-theme] .border-brand-500 { border-color: var(--pw-accent); }
+[data-theme] .focus\:border-brand-500:focus { border-color: var(--pw-accent); }
+[data-theme] .focus-visible\:ring-brand-500:focus-visible { --tw-ring-color: var(--pw-accent); }
+
+/* Inputs/selects in dark themes need explicit text+bg or they'll inherit a
+   too-light look from the user agent stylesheet. */
+[data-theme^='dark-'] input,
+[data-theme^='dark-'] select,
+[data-theme^='dark-'] textarea {
+  color: var(--pw-text-primary);
+  background-color: var(--pw-bg-panel);
+  border-color: var(--pw-border);
+}
+[data-theme^='dark-'] input::placeholder,
+[data-theme^='dark-'] textarea::placeholder {
+  color: var(--pw-text-faint);
+}
+
+/* Selected-row highlight stays readable across themes. */
+[data-theme^='dark-'] .bg-brand-50 {
+  background-color: var(--pw-accent-soft);
+}
+
+/* ==========================================================================
+   Cheap virtualization: `content-visibility: auto` lets the browser skip
+   layout/paint for items that are off-screen, which makes lists of thousands
+   of products scroll smoothly without a windowing library. The
+   contain-intrinsic-size hint reserves a placeholder height so the scrollbar
+   stays stable; the values below match the rendered item heights closely
+   enough that scroll-jumps are imperceptible.
+   ========================================================================== */
+.cv-list-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 76px;
+}
+.cv-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 116px;
+}
+.cv-grid {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 240px;
 }

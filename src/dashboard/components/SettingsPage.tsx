@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { sendRpc } from '@/shared/rpc';
-import type { UserSettings } from '@/shared/types';
+import type { ProductDisplayMode, ThemeId, UserSettings } from '@/shared/types';
 import { validatePayload } from '@/services/import-export';
 import type { ImportSummary } from '@/services/import-export';
+import { THEMES } from '@/shared/themes';
 
 const INTERVAL_OPTIONS: { value: UserSettings['updateInterval']; label: string }[] = [
   { value: 15, label: '15 мин' },
@@ -188,6 +189,16 @@ export function SettingsPage({ onSettingsSaved }: Props = {}) {
             Внешний вид
           </h2>
           <div className="mt-4 space-y-4">
+            <ThemePicker
+              value={settings.theme}
+              onChange={(theme) => void patch({ theme })}
+            />
+
+            <DisplayModePicker
+              value={settings.displayMode}
+              onChange={(displayMode) => void patch({ displayMode })}
+            />
+
             <Toggle
               label="Цветные метки маркетплейсов"
               description="Показывать цветную полосу слева у каждого товара и подсвеченную плашку маркетплейса в подписи (Ozon — синий, Wildberries — розовый, Я.Маркет — жёлтый)."
@@ -358,6 +369,149 @@ function Toggle({
         {description && <div className="mt-0.5 text-xs text-slate-500">{description}</div>}
       </div>
     </label>
+  );
+}
+
+function ThemePicker({
+  value,
+  onChange,
+}: {
+  value: ThemeId;
+  onChange: (id: ThemeId) => void;
+}) {
+  const lights = THEMES.filter((t) => t.variant === 'light');
+  const darks = THEMES.filter((t) => t.variant === 'dark');
+  return (
+    <div className="rounded-md border border-slate-200 bg-white p-4">
+      <div className="text-sm font-medium text-slate-900">Тема оформления</div>
+      <p className="mt-0.5 text-xs text-slate-500">
+        10 палитр на выбор: 5 светлых и 5 тёмных. «Авто» подстраивается под системные
+        настройки.
+      </p>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <ThemeChip
+          id="auto"
+          label="Авто"
+          swatches={['#f8fafc', '#0f172a']}
+          active={value === 'auto'}
+          onClick={() => onChange('auto')}
+        />
+      </div>
+
+      <div className="mt-4">
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          Светлые
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+          {lights.map((t) => (
+            <ThemeChip
+              key={t.id}
+              id={t.id}
+              label={t.label}
+              swatches={t.swatches}
+              active={value === t.id}
+              onClick={() => onChange(t.id)}
+            />
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-4">
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          Тёмные
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+          {darks.map((t) => (
+            <ThemeChip
+              key={t.id}
+              id={t.id}
+              label={t.label}
+              swatches={t.swatches}
+              active={value === t.id}
+              onClick={() => onChange(t.id)}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ThemeChip({
+  label,
+  swatches,
+  active,
+  onClick,
+}: {
+  id: ThemeId;
+  label: string;
+  swatches: [string, string];
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`group flex items-center gap-2 rounded-md border px-2 py-1.5 text-left text-xs transition ${
+        active
+          ? 'border-brand-500 bg-brand-50 text-brand-700'
+          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+      }`}
+    >
+      <span
+        aria-hidden
+        className="flex h-6 w-6 shrink-0 overflow-hidden rounded border border-slate-200"
+      >
+        <span className="block h-full w-1/2" style={{ background: swatches[0] }} />
+        <span className="block h-full w-1/2" style={{ background: swatches[1] }} />
+      </span>
+      <span className="truncate">{label}</span>
+    </button>
+  );
+}
+
+function DisplayModePicker({
+  value,
+  onChange,
+}: {
+  value: ProductDisplayMode;
+  onChange: (m: ProductDisplayMode) => void;
+}) {
+  const opts: { v: ProductDisplayMode; label: string; desc: string }[] = [
+    { v: 'list',  label: 'Список',  desc: 'Плотные строки — больше товаров на экране.' },
+    { v: 'cards', label: 'Каталог', desc: 'Крупные карточки с превью и ценой.' },
+    { v: 'grid',  label: 'Сетка',   desc: 'Двухколоночная плитка с большим изображением.' },
+  ];
+  return (
+    <div className="rounded-md border border-slate-200 bg-white p-4">
+      <div className="text-sm font-medium text-slate-900">Отображение списка товаров</div>
+      <p className="mt-0.5 text-xs text-slate-500">
+        Можно переключать прямо из заголовка списка — этот выбор синхронизирован.
+      </p>
+      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+        {opts.map((o) => {
+          const active = value === o.v;
+          return (
+            <button
+              key={o.v}
+              type="button"
+              onClick={() => onChange(o.v)}
+              className={`rounded-md border px-3 py-2 text-left text-sm transition ${
+                active
+                  ? 'border-brand-500 bg-brand-50 text-brand-700'
+                  : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+              }`}
+            >
+              <div className="font-medium">{o.label}</div>
+              <div className="mt-0.5 text-[11px] text-slate-500">{o.desc}</div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

@@ -189,7 +189,7 @@ export type RpcMap = {
     };
   };
   'dashboard/open': {
-    request: { notificationId?: string };
+    request: { notificationId?: string; productId?: string };
     response: { ok: true };
   };
   'ping': {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { sendRpc } from '@/shared/rpc';
 import type { AppNotification, Collection, Marketplace, Product, UserSettings } from '@/shared/types';
 import { MARKETPLACES } from '@/shared/constants';
+import { resolveThemeId } from '@/shared/themes';
 import { Sidebar, type ScopeFilter } from './components/Sidebar';
 import {
   ProductList,
@@ -37,10 +38,14 @@ export function App() {
     const m = initialHash.match(/^#notifications\/([^/?&]+)$/);
     return m ? decodeURIComponent(m[1]) : null;
   });
+  const initialProductIdFromHash = (() => {
+    const m = initialHash.match(/^#product\/([^/?&]+)$/);
+    return m ? decodeURIComponent(m[1]) : null;
+  })();
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortKey>('updated');
   const [filters, setFilters] = useState<ListFilters>(DEFAULT_FILTERS);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialProductIdFromHash);
   const [selectedMarketplaces, setSelectedMarketplaces] = useState<Set<Marketplace>>(
     () => new Set(MARKETPLACES),
   );
@@ -79,6 +84,23 @@ export function App() {
     void load();
   }, [load]);
 
+  // Apply the theme picked in settings to <html data-theme="...">. Re-runs
+  // whenever settings change (theme picker triggers a settings/update which
+  // calls load(), which sets a new settings object).
+  useEffect(() => {
+    const themeId = settings?.theme ?? 'auto';
+    const apply = () => {
+      document.documentElement.setAttribute('data-theme', resolveThemeId(themeId));
+    };
+    apply();
+    if (themeId === 'auto' && typeof window !== 'undefined' && window.matchMedia) {
+      const mq = window.matchMedia('(prefers-color-scheme: dark)');
+      const onChange = () => apply();
+      mq.addEventListener('change', onChange);
+      return () => mq.removeEventListener('change', onChange);
+    }
+  }, [settings?.theme]);
+
   // When the dashboard opens (or is navigated) to a specific notification via
   // hash, mark it read once the list is loaded.
   useEffect(() => {
@@ -101,6 +123,14 @@ export function App() {
         setScope({ kind: 'notifications' });
         const m = h.match(/^#notifications\/([^/?&]+)$/);
         setSelectedNotificationId(m ? decodeURIComponent(m[1]) : null);
+      } else if (h.startsWith('#product/')) {
+        // Popup → "open product in dashboard" navigates the existing tab to
+        // #product/<id>; surface that product in the All Products view.
+        const m = h.match(/^#product\/([^/?&]+)$/);
+        if (m) {
+          setScope({ kind: 'all' });
+          setSelectedId(decodeURIComponent(m[1]));
+        }
       }
     };
     window.addEventListener('hashchange', apply);
@@ -256,8 +286,16 @@ export function App() {
     });
   }
 
+  const displayMode = settings?.displayMode ?? 'list';
+  // The product list pane gets more horizontal room in card/grid modes — a
+  // 360px lane is too cramped for two-column thumbnails or larger cards.
+  const listColumnPx = displayMode === 'grid' ? 460 : displayMode === 'cards' ? 420 : 360;
+
   return (
-    <div className="grid h-screen grid-cols-[240px_360px_1fr] bg-slate-50">
+    <div
+      className="grid h-screen w-full bg-slate-50"
+      style={{ gridTemplateColumns: `240px ${listColumnPx}px minmax(0, 1fr)` }}
+    >
       <BulkRefreshToast summary={bulkSummary} onClose={() => setBulkSummary(null)} />
       <Sidebar
         scope={scope}
@@ -271,7 +309,6 @@ export function App() {
         unreadNotifications={unreadCount}
         collections={collections}
         onCollectionsChange={() => void load()}
-        schedulerBump={schedulerBump}
       />
 
       {loading ? (
@@ -357,6 +394,15 @@ export function App() {
             bulkRefreshProgress={bulkRefreshProgress}
             onRemoveProduct={handleRemove}
             marketplaceColorCoding={settings?.marketplaceColorCoding ?? true}
+            displayMode={displayMode}
+            onDisplayModeChange={(m) => {
+              // Persist immediately — feels weird when the toggle reverts on
+              // refresh.
+              void sendRpc('settings/update', { patch: { displayMode: m } }).then(() =>
+                load(),
+              );
+            }}
+            schedulerBump={schedulerBump}
           />
           {selectedProduct ? (
             <ProductDetail

@@ -28,6 +28,7 @@ export const DEFAULT_SETTINGS = {
   excludedDomains: [] as string[],
   locale: 'ru' as const,
   marketplaceColorCoding: true,
+  displayMode: 'list' as const,
 };
 
 /** Marketplace brand colors for the colored-stripe in product lists. */

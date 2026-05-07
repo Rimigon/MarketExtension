@@ -155,6 +155,26 @@ export interface Collection {
 /** Update interval in minutes. 1440 = once a day. */
 export type UpdateIntervalMinutes = 15 | 30 | 60 | 180 | 360 | 720 | 1440;
 
+/**
+ * 10 hand-picked palettes (5 light + 5 dark) plus 'auto' which follows the
+ * OS prefers-color-scheme. The actual color tokens live in `src/shared/themes.ts`.
+ */
+export type ThemeId =
+  | 'auto'
+  | 'light-default'
+  | 'light-cream'
+  | 'light-mint'
+  | 'light-sky'
+  | 'light-rose'
+  | 'dark-slate'
+  | 'dark-midnight'
+  | 'dark-forest'
+  | 'dark-violet'
+  | 'dark-amber';
+
+/** How the dashboard renders the product list. */
+export type ProductDisplayMode = 'list' | 'grid' | 'cards';
+
 export interface UserSettings {
   id: 'singleton';
   updateInterval: UpdateIntervalMinutes;
@@ -167,11 +187,13 @@ export interface UserSettings {
   scheduledUpdates: boolean;
   quietHours?: { from: string; to: string };
   maxNotificationsPerHour: number;
-  theme: 'light' | 'dark' | 'auto';
+  theme: ThemeId;
   excludedDomains: string[];
   locale: 'ru' | 'en';
   /** Show a colored stripe per marketplace in product lists. */
   marketplaceColorCoding: boolean;
+  /** Dashboard product list rendering mode. */
+  displayMode: ProductDisplayMode;
 }
 
 /**

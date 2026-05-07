@@ -143,6 +143,14 @@ export function openDashboardAtNotifications(noteId?: string): Promise<void> {
   return openDashboardAt(noteId ? `#notifications/${noteId}` : '#notifications');
 }
 
+/**
+ * Open the dashboard focused on a specific product. Reuses an open dashboard
+ * tab when possible (mirrors openDashboardAtNotifications).
+ */
+export function openDashboardAtProduct(productId: string): Promise<void> {
+  return openDashboardAt(`#product/${encodeURIComponent(productId)}`);
+}
+
 function parseAppNotificationId(chromeNotificationId: string): string | null {
   // Bulk-refresh summary uses a different prefix and isn't tied to a single AppNotification row.
   if (chromeNotificationId.startsWith('pricewatch:scheduledRefresh:')) return null;

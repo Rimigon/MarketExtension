@@ -10,7 +10,12 @@ import { recommendation } from '@/services/recommendation';
 import { stats as statsService } from '@/services/stats';
 import { buildPayload, validatePayload } from '@/services/import-export';
 import type { ImportSummary } from '@/services/import-export';
-import { processProductUpdate, refreshBadge, openDashboardAtNotifications } from './notifier';
+import {
+  processProductUpdate,
+  refreshBadge,
+  openDashboardAtNotifications,
+  openDashboardAtProduct,
+} from './notifier';
 import {
   applySettings,
   getSchedulerStatus,
@@ -392,8 +397,12 @@ export const handlers: RpcHandlerMap = {
     return { settings };
   },
 
-  'dashboard/open': async ({ notificationId }) => {
-    await openDashboardAtNotifications(notificationId);
+  'dashboard/open': async ({ notificationId, productId }) => {
+    if (productId) {
+      await openDashboardAtProduct(productId);
+    } else {
+      await openDashboardAtNotifications(notificationId);
+    }
     return { ok: true };
   },
 
