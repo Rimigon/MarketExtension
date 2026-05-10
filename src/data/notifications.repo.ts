@@ -66,4 +66,10 @@ export const notificationsRepo = {
       .sortBy('createdAt');
     return matches[0]?.createdAt ?? null;
   },
+
+  /** Count notifications recorded at or after `sinceMs`. Used for the
+   *  per-hour rate limit when deciding whether to surface an OS popup. */
+  async countSince(sinceMs: number): Promise<number> {
+    return db().notifications.where('createdAt').aboveOrEqual(sinceMs).count();
+  },
 };

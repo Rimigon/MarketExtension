@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { formatPrice, formatPercent } from '@/shared/format';
+import { formatPrice, formatPercent, formatRelative, formatUnavailableLabel } from '@/shared/format';
 import { MARKETPLACE_ACCENT, MARKETPLACE_LABELS } from '@/shared/constants';
 import type { Product, ProductDisplayMode } from '@/shared/types';
 import { SchedulerHint } from './SchedulerHint';
@@ -171,7 +171,9 @@ export function ProductList({
         {sorted.length === 0 ? (
           <p className="px-4 py-8 text-sm text-slate-500">Ничего не найдено.</p>
         ) : displayMode === 'grid' ? (
-          <ul className="grid grid-cols-2 gap-2 p-3">
+          // auto-rows-fr forces every row to take the height of the tallest
+          // cell, so cards line up cleanly even when titles wrap differently.
+          <ul className="grid auto-rows-fr grid-cols-2 gap-2 p-3">
             {sorted.map((p) => (
               <GridItem key={p.id} product={p} {...itemProps} />
             ))}
@@ -247,7 +249,9 @@ function ListItem({
       <div className="min-w-0">
         <div className="flex items-center gap-1">
           {p.isFavorite && <span className="text-amber-500">★</span>}
-          <span className="truncate text-sm font-medium text-slate-900">{p.title}</span>
+          <span className={`truncate text-sm font-medium ${p.unavailable ? 'text-slate-500 line-through' : 'text-slate-900'}`}>
+            {p.title}
+          </span>
         </div>
         <div className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-slate-500">
           {marketplaceColorCoding ? (
@@ -261,6 +265,7 @@ function ListItem({
             <span>{MARKETPLACE_LABELS[p.marketplace]}</span>
           )}
           {p.brand && <span className="truncate">· {p.brand}</span>}
+          <UnavailableBadge product={p} size="xs" />
         </div>
         {p.tags.length > 0 && (
           <div className="mt-1 flex flex-wrap gap-1">
@@ -279,6 +284,12 @@ function ListItem({
         <div>
           <div className="font-medium text-slate-900">{formatPrice(p.currentPrice)}</div>
           <TrendChip trend={trends[p.id] ?? null} />
+          <div
+            className="mt-0.5 text-[10px] text-slate-400"
+            title={`Обновлено ${new Date(p.updatedAt).toLocaleString('ru-RU')}`}
+          >
+            {formatRelative(p.updatedAt)}
+          </div>
           {p.goal?.targetPrice != null && (
             <div className="mt-0.5 text-[10px] text-slate-500">
               цель {formatPrice(p.goal.targetPrice)}
@@ -359,7 +370,9 @@ function CardItem({
           ? { boxShadow: `inset 4px 0 0 ${accent.stripe}` }
           : undefined
       }
-      className={`cv-card flex cursor-pointer gap-3 rounded-md border p-3 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
+      // min-h locks every card to the same height regardless of whether the
+      // title takes one line or two. Keeps the list grid feeling uniform.
+      className={`cv-card flex min-h-[7rem] cursor-pointer gap-3 rounded-md border p-3 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
         selected
           ? 'border-brand-300 bg-brand-50'
           : 'border-slate-200 bg-white hover:border-slate-300'
@@ -370,16 +383,16 @@ function CardItem({
       ) : (
         <div className="h-20 w-20 shrink-0 rounded bg-slate-100" />
       )}
-      <div className="min-w-0 flex-1">
+      <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <div className="flex items-center gap-1">
               {p.isFavorite && <span className="text-amber-500">★</span>}
-              <span className="line-clamp-2 text-sm font-medium text-slate-900">
+              <span className={`line-clamp-2 min-h-[2.5rem] text-sm font-medium leading-5 ${p.unavailable ? 'text-slate-500 line-through' : 'text-slate-900'}`}>
                 {p.title}
               </span>
             </div>
-            <div className="mt-1 flex items-center gap-1.5 text-xs text-slate-500">
+            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
               {marketplaceColorCoding ? (
                 <span
                   style={{ background: accent.bg, color: accent.stripe }}
@@ -391,6 +404,7 @@ function CardItem({
                 <span>{MARKETPLACE_LABELS[p.marketplace]}</span>
               )}
               {p.brand && <span className="truncate">· {p.brand}</span>}
+              <UnavailableBadge product={p} />
             </div>
           </div>
           <div className="text-right">
@@ -400,14 +414,15 @@ function CardItem({
             <TrendChip trend={trends[p.id] ?? null} />
           </div>
         </div>
-        <div className="mt-2 flex items-center justify-between">
-          {p.goal?.targetPrice != null ? (
-            <span className="text-[11px] text-slate-500">
-              цель {formatPrice(p.goal.targetPrice)}
+        <div className="mt-auto flex items-center justify-between gap-2 pt-2">
+          <div className="flex min-w-0 items-center gap-2 text-[11px] text-slate-500">
+            <span title={`Обновлено ${new Date(p.updatedAt).toLocaleString('ru-RU')}`}>
+              {formatRelative(p.updatedAt)}
             </span>
-          ) : (
-            <span />
-          )}
+            {p.goal?.targetPrice != null && (
+              <span className="truncate">· цель {formatPrice(p.goal.targetPrice)}</span>
+            )}
+          </div>
           <div className="flex shrink-0 items-center gap-0.5">
             <a
               href={p.url}
@@ -478,7 +493,10 @@ function GridItem({
           ? { boxShadow: `inset 0 -3px 0 ${accent.stripe}` }
           : undefined
       }
-      className={`cv-grid flex cursor-pointer flex-col overflow-hidden rounded-md border text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
+      // h-full lets each cell stretch to the row height (set by auto-rows-fr).
+      // The inner column distributes: image (aspect-square) + meta (flex-1) so
+      // the price/footer line up at the bottom regardless of title length.
+      className={`cv-grid flex h-full cursor-pointer flex-col overflow-hidden rounded-md border text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
         selected
           ? 'border-brand-300 bg-brand-50'
           : 'border-slate-200 bg-white hover:border-slate-300'
@@ -488,18 +506,30 @@ function GridItem({
         <img
           src={p.imageUrl}
           alt=""
-          className="aspect-square w-full object-cover"
+          className="aspect-square w-full shrink-0 object-cover"
         />
       ) : (
-        <div className="aspect-square w-full bg-slate-100" />
+        <div className="aspect-square w-full shrink-0 bg-slate-100" />
       )}
-      <div className="space-y-1 p-2">
-        <div className="line-clamp-2 text-xs font-medium text-slate-900">{p.title}</div>
-        <div className="flex items-baseline justify-between">
-          <span className="text-sm font-semibold text-slate-900">
+      <div className="flex flex-1 flex-col gap-1 p-2">
+        {/* Fixed two-line title: line-clamp-2 + min-h ensures one-line and two-line
+            titles occupy the same vertical space so price rows line up. */}
+        <div className={`line-clamp-2 min-h-[2rem] text-xs font-medium leading-4 ${p.unavailable ? 'text-slate-500 line-through' : 'text-slate-900'}`}>
+          {p.title}
+        </div>
+        {p.unavailable && (
+          <div>
+            <UnavailableBadge product={p} size="xs" />
+          </div>
+        )}
+        <div className="mt-auto flex items-baseline justify-between gap-2">
+          <span className={`text-sm font-semibold ${p.unavailable ? 'text-slate-500' : 'text-slate-900'}`}>
             {formatPrice(p.currentPrice)}
           </span>
           <TrendChip trend={trends[p.id] ?? null} />
+        </div>
+        <div className="text-[10px] text-slate-400" title={`Обновлено ${new Date(p.updatedAt).toLocaleString('ru-RU')}`}>
+          {formatRelative(p.updatedAt)}
         </div>
       </div>
     </li>
@@ -662,6 +692,25 @@ export function applyFilters(products: Product[], f: ListFilters): Product[] {
     if (f.withGoalOnly && p.goal?.targetPrice == null) return false;
     return true;
   });
+}
+
+function UnavailableBadge({ product, size = 'sm' }: { product: Product; size?: 'sm' | 'xs' }) {
+  if (!product.unavailable) return null;
+  const label = formatUnavailableLabel(product.unavailable.reason);
+  const since = product.unavailable.since;
+  const cls =
+    size === 'xs'
+      ? 'inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-amber-800'
+      : 'inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800';
+  return (
+    <span
+      className={cls}
+      title={`Замечено ${formatRelative(since)} назад. ${label}.`}
+    >
+      <span aria-hidden>⚠</span>
+      {label}
+    </span>
+  );
 }
 
 function TrendChip({ trend }: { trend: Trend }) {

@@ -70,7 +70,14 @@ async function executeWildberries(url: string): Promise<ExecutorResult> {
 }
 
 const HIDDEN_HASH = '#__pwHidden';
-const HIDDEN_TAB_TIMEOUT_MS = 30_000;
+const HIDDEN_TAB_TIMEOUT_MS = 45_000;
+/** Soft window we wait for the first `complete` event on the marketplace host
+ *  before falling back to immediate probing. Most pages settle in under 5s;
+ *  giving up early is fine because the probe loop will keep trying anyway. */
+const NAV_WARMUP_MS = 8_000;
+/** Minimum budget reserved for the probe loop after the warm-up wait, so we
+ *  never start probing with only a few hundred ms left. */
+const MIN_PROBE_BUDGET_MS = 20_000;
 const PROBE_RETRY_MS = 800;
 const HIDDEN_TAB_STORAGE_KEY = 'pricewatch:hiddenTabId';
 const HIDDEN_TAB_IDLE_ALARM = 'pricewatch:hidden-tab-idle-close';
@@ -118,17 +125,37 @@ async function doRefreshViaHiddenTab(url: string): Promise<ExecutorResult> {
   console.info('[PriceWatch:exec] hidden tab ready', { tabId, created });
 
   try {
-    const loadedPromise = waitForTabCompleteForUrl(tabId, finalUrl, HIDDEN_TAB_TIMEOUT_MS);
+    // Watcher resolves on the *first* tab `complete` event for our marketplace
+    // host (with www. normalized) — used only as a soft warm-up signal so the
+    // very first probes don't race the parked.html teardown. Falls back to
+    // false on tab close / timeout, but that no longer aborts the refresh —
+    // probeWithRetry below has its own budget and is the authoritative signal.
+    let expectedHost = '';
+    try { expectedHost = stripWww(new URL(finalUrl).host); } catch { /* noop */ }
+    const navStartedAt = Date.now();
+    const loadedPromise = waitForAnyMarketplaceComplete(tabId, expectedHost, NAV_WARMUP_MS);
     await chrome.tabs.update(tabId, { url: finalUrl, active: false });
 
     const loaded = await loadedPromise;
-    if (!loaded) {
-      console.warn('[PriceWatch:exec] tab load timeout', tabId);
-      return { ok: false, error: 'tab_load_timeout' };
+    if (loaded) {
+      console.info('[PriceWatch:exec] tab complete, starting probe', tabId);
+    } else {
+      console.info(
+        '[PriceWatch:exec] no complete signal yet — probing anyway',
+        { tabId, waited: Date.now() - navStartedAt },
+      );
     }
-    console.info('[PriceWatch:exec] tab complete, starting probe', tabId);
 
-    const result = await probeWithRetry(tabId, HIDDEN_TAB_TIMEOUT_MS);
+    // probeWithRetry retries every PROBE_RETRY_MS for the remaining budget.
+    // Content scripts register their `pricewatch:probe` handler as soon as they
+    // load on the marketplace page; a successful response *is* "page ready".
+    // Errors prior to that (e.g. "Receiving end does not exist") are silently
+    // retried until either a real response arrives or we exhaust the timeout.
+    const remaining = Math.max(
+      MIN_PROBE_BUDGET_MS,
+      HIDDEN_TAB_TIMEOUT_MS - (Date.now() - navStartedAt),
+    );
+    const result = await probeWithRetry(tabId, remaining);
     console.info('[PriceWatch:exec] probe finished', {
       tabId,
       ok: result.ok,
@@ -213,44 +240,92 @@ async function writeStoredHiddenTabId(id: number | null): Promise<void> {
 }
 
 /**
- * Wait for the tab to finish loading the specific target URL. Used by the
- * about:blank → product-url two-step flow to avoid resolving on the about:blank
- * `complete` event that happens before navigation is even started.
+ * Resolves on the first `complete` event for the given tab whose URL lives on
+ * the marketplace host (with `www.` normalized). Used purely as a soft warm-up
+ * signal: we don't want to fire the very first probe while the tab is still on
+ * parked.html. Resolving false on timeout/close is *not* fatal — the caller
+ * proceeds to probe anyway, since the marketplace content script registers its
+ * `pricewatch:probe` handler as soon as it loads, which is the authoritative
+ * signal that the page is parseable.
+ *
+ * URL pathname intentionally NOT compared — marketplaces redirect to canonical
+ * URLs (Ozon strips `?asb=...`, sometimes mutates the slug; WB toggles `www.`)
+ * and a stricter check produced false-negative `tab_load_timeout`s for legit
+ * fully-loaded pages.
  */
-function waitForTabCompleteForUrl(
+function waitForAnyMarketplaceComplete(
   tabId: number,
-  expectedUrl: string,
+  expectedHost: string,
   timeoutMs: number,
 ): Promise<boolean> {
-  // Strip the hash for matching — Chrome may report tab.url without the fragment.
-  const expectedBase = expectedUrl.replace(/#.*$/, '');
+  if (!expectedHost) return Promise.resolve(false);
   return new Promise((resolve) => {
-    const listener = (
+    const cleanup = () => {
+      chrome.tabs.onUpdated.removeListener(updatedListener);
+      chrome.tabs.onRemoved.removeListener(removedListener);
+      clearTimeout(timer);
+    };
+    const updatedListener = (
       id: number,
       change: chrome.tabs.TabChangeInfo,
       tab: chrome.tabs.Tab,
     ) => {
       if (id !== tabId) return;
       if (change.status !== 'complete') return;
-      const tabUrl = (tab.url ?? '').replace(/#.*$/, '');
-      if (tabUrl && tabUrl.startsWith(expectedBase)) {
-        chrome.tabs.onUpdated.removeListener(listener);
-        clearTimeout(timer);
-        resolve(true);
+      if (!tab.url) return;
+      let actual: URL;
+      try {
+        actual = new URL(tab.url);
+      } catch {
+        return;
       }
+      // Skip parked.html (chrome-extension://) and any non-http navigation.
+      if (actual.protocol !== 'http:' && actual.protocol !== 'https:') return;
+      if (stripWww(actual.host) !== expectedHost) return;
+      cleanup();
+      resolve(true);
+    };
+    const removedListener = (closedId: number) => {
+      if (closedId !== tabId) return;
+      cleanup();
+      resolve(false);
     };
     const timer = setTimeout(() => {
-      chrome.tabs.onUpdated.removeListener(listener);
+      cleanup();
       resolve(false);
     }, timeoutMs);
-    chrome.tabs.onUpdated.addListener(listener);
+    chrome.tabs.onUpdated.addListener(updatedListener);
+    chrome.tabs.onRemoved.addListener(removedListener);
   });
 }
+
+function stripWww(host: string): string {
+  return host.toLowerCase().replace(/^www\./, '');
+}
+
+/**
+ * Reasons returned by `probeOnce` in run.ts that mean «the page is loaded and
+ * we have a final verdict — retrying won't change the answer». Two flavours:
+ *
+ *  - HARD terminal: URL itself is the problem (`not_product_page`) or parser
+ *    explicitly reported failure (`parser_status_failed`). Bail out instantly.
+ *  - SOFT terminal: parser saw the page but couldn't extract a price
+ *    (`parser_failed`, `no_price`). Could be a real delisting, but could also
+ *    be a hydration race — WB's wallet element renders 1–4s after the
+ *    document `complete` event, and Ozon SPAs sometimes inject the price
+ *    block late. Give exactly one more probe after a longer settle delay,
+ *    then accept the verdict.
+ */
+const HARD_TERMINAL_REASONS = new Set(['not_product_page', 'parser_status_failed']);
+const SOFT_TERMINAL_REASONS = new Set(['parser_failed', 'no_price']);
+const SOFT_TERMINAL_SETTLE_MS = 3_000;
 
 async function probeWithRetry(tabId: number, timeoutMs: number): Promise<ExecutorResult> {
   const start = Date.now();
   let lastErr = 'no_response';
   let attempt = 0;
+  let softTerminalSeenAt = 0;
+
   while (Date.now() - start < timeoutMs) {
     attempt++;
     try {
@@ -264,9 +339,41 @@ async function probeWithRetry(tabId: number, timeoutMs: number): Promise<Executo
       }
       if (resp && !resp.ok) {
         lastErr = resp.reason || 'probe_failed';
-        console.info('[PriceWatch:exec] probe not ready', { tabId, attempt, reason: lastErr });
+        if (HARD_TERMINAL_REASONS.has(lastErr)) {
+          console.info('[PriceWatch:exec] probe terminal (hard)', { tabId, attempt, reason: lastErr });
+          return { ok: false, error: lastErr };
+        }
+        if (SOFT_TERMINAL_REASONS.has(lastErr)) {
+          // First soft-terminal: arm the settle timer and keep retrying. After
+          // SOFT_TERMINAL_SETTLE_MS has elapsed AND we still see the same
+          // soft-terminal reason, accept it as final. This catches hydration
+          // races without burning the full 45s budget on truly delisted items.
+          if (softTerminalSeenAt === 0) {
+            softTerminalSeenAt = Date.now();
+            console.info('[PriceWatch:exec] probe soft-terminal — waiting for hydration', {
+              tabId,
+              attempt,
+              reason: lastErr,
+            });
+          } else if (Date.now() - softTerminalSeenAt >= SOFT_TERMINAL_SETTLE_MS) {
+            console.info('[PriceWatch:exec] probe soft-terminal settled', {
+              tabId,
+              attempt,
+              reason: lastErr,
+              waited: Date.now() - softTerminalSeenAt,
+            });
+            return { ok: false, error: lastErr };
+          }
+          // else: keep probing — same reason re-observed but still inside the
+          // settle window.
+        } else {
+          // Different transient response — reset soft-terminal arm.
+          softTerminalSeenAt = 0;
+          console.info('[PriceWatch:exec] probe not ready', { tabId, attempt, reason: lastErr });
+        }
       } else {
         lastErr = 'no_response_undefined';
+        softTerminalSeenAt = 0;
         console.info('[PriceWatch:exec] probe undefined response', { tabId, attempt });
       }
     } catch (err) {

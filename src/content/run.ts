@@ -1,7 +1,12 @@
 import type { Parser } from '@/parsers/base';
 import type { ParsedProduct } from '@/shared/types';
 import { sendRpc } from '@/shared/rpc';
-import { injectTrackButton, teardownInjection } from './injector';
+import {
+  injectStatsFloater,
+  injectTrackButton,
+  teardownInjection,
+  teardownStatsFloater,
+} from './injector';
 
 const HOST_ID = 'pricewatch-track-host';
 
@@ -172,9 +177,22 @@ export function runContentScript(parser: Parser, label: string, opts: RunOptions
     try {
       const initialProduct = await getInitialProductFor(parsed);
       teardownInjection();
-      injectTrackButton({ anchor, parsed, initialProduct });
+      injectTrackButton({
+        anchor,
+        parsed,
+        initialProduct,
+        onTrackingChange: (product) => {
+          // Tracking just toggled via the inline button — sync the floater so
+          // the user immediately sees stats appear (or disappear).
+          if (product) injectStatsFloater(product);
+          else teardownStatsFloater();
+        },
+      });
       currentAnchor = anchor;
       lastDiag = 'injected'; // reset dedup so re-checks log fresh state
+      // Stats floater (bottom-right) is independent of the anchor — only show
+      // it once we know the product is tracked.
+      if (initialProduct) injectStatsFloater(initialProduct);
       // Passive sync: товар уже отслеживается → молча обновим product + запишем точку,
       // если цена изменилась. Кулдаун 30с защищает от повторных вызовов на SPA-mutation.
       if (initialProduct && parsed.parserStatus !== 'failed' && parsed.currentPrice != null) {
@@ -185,9 +203,11 @@ export function runContentScript(parser: Parser, label: string, opts: RunOptions
           now - lastPassiveSync.at < PASSIVE_SYNC_COOLDOWN_MS;
         if (!syncedRecently) {
           lastPassiveSync = { canonicalUrl: parsed.canonicalUrl, at: now };
-          void sendRpc('product/add', { parsed, source: 'page' }).catch((err) =>
-            console.warn(prefix, 'passive sync failed', err),
-          );
+          void sendRpc('product/add', { parsed, source: 'page' })
+            .then((resp) => {
+              if (resp.ok) injectStatsFloater(resp.product);
+            })
+            .catch((err) => console.warn(prefix, 'passive sync failed', err));
         }
       }
     } finally {
@@ -229,6 +249,7 @@ export function runContentScript(parser: Parser, label: string, opts: RunOptions
 
   const stopWatchingSpa = parser.watchSpa(() => {
     teardownInjection();
+    teardownStatsFloater();
     currentAnchor = null;
     cachedEnrich = null;
     setTimeout(() => startObserving(), 600);
@@ -237,6 +258,7 @@ export function runContentScript(parser: Parser, label: string, opts: RunOptions
   window.addEventListener('beforeunload', () => {
     observer?.disconnect();
     stopWatchingSpa();
+    teardownStatsFloater();
   });
 
   // Expose a manual probe for the user: in DevTools console run `__pricewatch.probe()` to see

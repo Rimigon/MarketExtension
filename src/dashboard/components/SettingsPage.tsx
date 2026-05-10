@@ -1,9 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import { sendRpc } from '@/shared/rpc';
-import type { ProductDisplayMode, ThemeId, UserSettings } from '@/shared/types';
+import type {
+  NotificationRule,
+  NotificationTrigger,
+  ProductDisplayMode,
+  ThemeId,
+  UserSettings,
+} from '@/shared/types';
 import { validatePayload } from '@/services/import-export';
 import type { ImportSummary } from '@/services/import-export';
 import { THEMES } from '@/shared/themes';
+import { formatPrice } from '@/shared/format';
 
 const INTERVAL_OPTIONS: { value: UserSettings['updateInterval']; label: string }[] = [
   { value: 15, label: '15 мин' },
@@ -219,8 +226,20 @@ export function SettingsPage({ onSettingsSaved }: Props = {}) {
               onChange={(v) => void patch({ maxNotificationsPerHour: v })}
               min={0}
               max={50}
-              description="Если уведомлений больше — лишние сольются в дайджест (V1)."
+              description="Когда лимит превышен, уведомления продолжают сохраняться в журнале (бейдж на иконке растёт), но всплывающие уведомления Windows подавляются. 0 — без лимита."
             />
+
+            <QuietHoursPanel
+              value={settings.quietHours ?? null}
+              onChange={(quietHours) => void patch({ quietHours: quietHours ?? undefined })}
+            />
+
+            <ExcludedDomainsPanel
+              value={settings.excludedDomains}
+              onChange={(excludedDomains) => void patch({ excludedDomains })}
+            />
+
+            <NotificationRulesPanel />
           </div>
         </section>
 
@@ -513,6 +532,479 @@ function DisplayModePicker({
       </div>
     </div>
   );
+}
+
+function QuietHoursPanel({
+  value,
+  onChange,
+}: {
+  value: { from: string; to: string } | null;
+  onChange: (v: { from: string; to: string } | null) => void;
+}) {
+  const enabled = value != null;
+  // Local draft so the user can type a partial time without immediately
+  // round-tripping a half-formed value through settings storage.
+  const [draft, setDraft] = useState({ from: value?.from ?? '23:00', to: value?.to ?? '08:00' });
+
+  useEffect(() => {
+    if (value) setDraft(value);
+  }, [value]);
+
+  function commit(next: { from: string; to: string }) {
+    if (!isValidHHMM(next.from) || !isValidHHMM(next.to)) return;
+    onChange(next);
+  }
+
+  return (
+    <div className="rounded-md border border-slate-200 bg-white p-4">
+      <label className="flex cursor-pointer items-start gap-3">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => onChange(e.target.checked ? draft : null)}
+          className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-500 focus:ring-brand-500"
+        />
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium text-slate-900">Тихие часы</div>
+          <p className="mt-0.5 text-xs text-slate-500">
+            В это время уведомления будут сохраняться в журнал, но без всплывающих
+            окон ОС. Поддерживается переход через полночь (22:00 → 08:00).
+          </p>
+          {enabled && (
+            <div className="mt-3 flex items-center gap-2">
+              <label className="text-sm text-slate-700">с</label>
+              <input
+                type="time"
+                value={draft.from}
+                onChange={(e) => {
+                  const next = { ...draft, from: e.target.value };
+                  setDraft(next);
+                  commit(next);
+                }}
+                className="rounded-md border border-slate-200 px-2 py-1 text-sm focus:border-brand-500 focus:outline-none"
+              />
+              <label className="text-sm text-slate-700">до</label>
+              <input
+                type="time"
+                value={draft.to}
+                onChange={(e) => {
+                  const next = { ...draft, to: e.target.value };
+                  setDraft(next);
+                  commit(next);
+                }}
+                className="rounded-md border border-slate-200 px-2 py-1 text-sm focus:border-brand-500 focus:outline-none"
+              />
+              <span className="text-xs text-slate-500">локальное время</span>
+            </div>
+          )}
+        </div>
+      </label>
+    </div>
+  );
+}
+
+function isValidHHMM(s: string): boolean {
+  return /^\d{2}:\d{2}$/.test(s);
+}
+
+function ExcludedDomainsPanel({
+  value,
+  onChange,
+}: {
+  value: string[];
+  onChange: (v: string[]) => void;
+}) {
+  const [input, setInput] = useState('');
+
+  function add() {
+    const cleaned = input.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+    if (!cleaned) return;
+    if (value.includes(cleaned)) {
+      setInput('');
+      return;
+    }
+    onChange([...value, cleaned]);
+    setInput('');
+  }
+
+  function remove(d: string) {
+    onChange(value.filter((x) => x !== d));
+  }
+
+  return (
+    <div className="rounded-md border border-slate-200 bg-white p-4">
+      <div className="text-sm font-medium text-slate-900">Исключённые домены</div>
+      <p className="mt-0.5 text-xs text-slate-500">
+        Уведомления для товаров с этих доменов не будут срабатывать совсем —
+        ни всплывающих, ни записи в журнал. Полезно, чтобы временно заглушить
+        целый маркетплейс. Введите host (например, <code>www.ozon.ru</code>);
+        совпадение проверяется и по поддоменам.
+      </p>
+      <div className="mt-3 flex gap-2">
+        <input
+          type="text"
+          placeholder="например, ozon.ru"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              add();
+            }
+          }}
+          className="flex-1 rounded-md border border-slate-200 px-2 py-1.5 text-sm focus:border-brand-500 focus:outline-none"
+        />
+        <button
+          type="button"
+          onClick={add}
+          disabled={input.trim() === ''}
+          className="rounded-md bg-brand-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Добавить
+        </button>
+      </div>
+      {value.length > 0 ? (
+        <ul className="mt-3 flex flex-wrap gap-1.5">
+          {value.map((d) => (
+            <li key={d}>
+              <button
+                type="button"
+                onClick={() => remove(d)}
+                title="Убрать из списка"
+                className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs text-slate-700 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
+              >
+                {d}
+                <span aria-hidden>×</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-3 text-xs text-slate-400">Пусто — уведомления приходят со всех доменов.</p>
+      )}
+    </div>
+  );
+}
+
+/* --------------------------- notification rules --------------------------- */
+
+const TRIGGER_OPTIONS: { value: NotificationTrigger['kind']; label: string; needsValue: boolean }[] = [
+  { value: 'dropPct',          label: 'Падение цены на %',           needsValue: true  },
+  { value: 'dropAbs',          label: 'Падение цены на ₽',           needsValue: true  },
+  { value: 'priceBelow',       label: 'Цена ниже значения, ₽',       needsValue: true  },
+  { value: 'discountAppeared', label: 'Появилась скидка',            needsValue: false },
+  { value: 'backInStock',      label: 'Снова в наличии',             needsValue: false },
+  { value: 'historicalLow',    label: 'Исторический минимум',        needsValue: false },
+];
+
+function NotificationRulesPanel() {
+  const [rules, setRules] = useState<NotificationRule[] | null>(null);
+  const [adding, setAdding] = useState(false);
+
+  async function reload() {
+    const resp = await sendRpc('notificationRules/list', {});
+    setRules(resp.rules);
+  }
+
+  useEffect(() => {
+    void reload();
+  }, []);
+
+  async function saveRule(rule: NotificationRule | (Omit<NotificationRule, 'id'> & { id?: string })) {
+    await sendRpc('notificationRules/upsert', { rule });
+    await reload();
+  }
+
+  async function removeRule(id: string) {
+    if (!confirm('Удалить это правило?')) return;
+    await sendRpc('notificationRules/remove', { id });
+    await reload();
+  }
+
+  if (rules == null) {
+    return (
+      <div className="rounded-md border border-slate-200 bg-white p-4 text-sm text-slate-500">
+        Загрузка правил…
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-md border border-slate-200 bg-white p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-medium text-slate-900">Правила уведомлений</div>
+          <p className="mt-0.5 text-xs text-slate-500">
+            Глобальные правила применяются ко всем отслеживаемым товарам. Если
+            ни одно правило не сработает — уведомление не придёт. Между
+            повторными срабатываниями одного правила соблюдается «кулдаун» в
+            минутах.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setAdding(true)}
+          className="shrink-0 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 hover:border-slate-300"
+        >
+          + Добавить
+        </button>
+      </div>
+
+      <ul className="mt-3 divide-y divide-slate-100">
+        {rules.length === 0 && !adding && (
+          <li className="py-3 text-xs text-slate-400">
+            Правил пока нет. Уведомления приходить не будут.
+          </li>
+        )}
+        {rules.map((r) => (
+          <RuleRow
+            key={r.id}
+            rule={r}
+            onSave={saveRule}
+            onRemove={() => removeRule(r.id)}
+          />
+        ))}
+        {adding && (
+          <li className="py-3">
+            <RuleEditor
+              initial={null}
+              onCancel={() => setAdding(false)}
+              onSubmit={async (draft) => {
+                await saveRule(draft);
+                setAdding(false);
+              }}
+            />
+          </li>
+        )}
+      </ul>
+    </div>
+  );
+}
+
+function RuleRow({
+  rule,
+  onSave,
+  onRemove,
+}: {
+  rule: NotificationRule;
+  onSave: (r: NotificationRule) => Promise<void>;
+  onRemove: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+
+  if (editing) {
+    return (
+      <li className="py-3">
+        <RuleEditor
+          initial={rule}
+          onCancel={() => setEditing(false)}
+          onSubmit={async (draft) => {
+            await onSave({ ...draft, id: rule.id });
+            setEditing(false);
+          }}
+        />
+      </li>
+    );
+  }
+
+  return (
+    <li className="flex items-center justify-between gap-3 py-2">
+      <div className="flex min-w-0 items-center gap-3">
+        <input
+          type="checkbox"
+          checked={rule.enabled}
+          onChange={(e) => void onSave({ ...rule, enabled: e.target.checked })}
+          className="h-4 w-4 rounded border-slate-300 text-brand-500 focus:ring-brand-500"
+          title={rule.enabled ? 'Выключить' : 'Включить'}
+        />
+        <div className={`min-w-0 ${rule.enabled ? '' : 'opacity-50'}`}>
+          <div className="text-sm text-slate-900">{describeTrigger(rule.trigger)}</div>
+          <div className="text-[11px] text-slate-500">
+            кулдаун {formatCooldown(rule.cooldownMinutes)}
+            {rule.scope.kind === 'product' && ' · только для конкретного товара'}
+          </div>
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className="rounded px-2 py-1 text-xs text-slate-600 hover:bg-slate-100"
+        >
+          Изменить
+        </button>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="rounded px-2 py-1 text-xs text-rose-600 hover:bg-rose-50"
+        >
+          Удалить
+        </button>
+      </div>
+    </li>
+  );
+}
+
+function RuleEditor({
+  initial,
+  onSubmit,
+  onCancel,
+}: {
+  initial: NotificationRule | null;
+  onSubmit: (rule: Omit<NotificationRule, 'id'>) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [kind, setKind] = useState<NotificationTrigger['kind']>(
+    initial?.trigger.kind ?? 'dropPct',
+  );
+  const [value, setValue] = useState<string>(() => initialValueString(initial?.trigger));
+  const [cooldownMinutes, setCooldownMinutes] = useState<number>(
+    initial?.cooldownMinutes ?? 60 * 12,
+  );
+  const [enabled, setEnabled] = useState<boolean>(initial?.enabled ?? true);
+  const opt = TRIGGER_OPTIONS.find((o) => o.value === kind)!;
+  const numericValue = Number(value);
+  const valid =
+    !opt.needsValue ||
+    (Number.isFinite(numericValue) && numericValue > 0);
+
+  async function submit() {
+    if (!valid) return;
+    const trigger = buildTrigger(kind, numericValue);
+    if (!trigger) return;
+    await onSubmit({
+      scope: initial?.scope ?? { kind: 'global' },
+      trigger,
+      enabled,
+      cooldownMinutes: Math.max(1, Math.round(cooldownMinutes)),
+    });
+  }
+
+  return (
+    <div className="rounded-md border border-brand-200 bg-brand-50/40 p-3">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto_auto]">
+        <label className="flex flex-col gap-1 text-xs text-slate-600">
+          Триггер
+          <select
+            value={kind}
+            onChange={(e) => setKind(e.target.value as NotificationTrigger['kind'])}
+            className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-sm focus:border-brand-500 focus:outline-none"
+          >
+            {TRIGGER_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {opt.needsValue && (
+          <label className="flex flex-col gap-1 text-xs text-slate-600">
+            {valueLabel(kind)}
+            <input
+              type="number"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              min={kind === 'dropPct' ? 1 : 1}
+              step={kind === 'dropPct' ? 1 : 10}
+              className="w-28 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-sm focus:border-brand-500 focus:outline-none"
+            />
+          </label>
+        )}
+        <label className="flex flex-col gap-1 text-xs text-slate-600">
+          Кулдаун, мин
+          <input
+            type="number"
+            value={cooldownMinutes}
+            onChange={(e) => setCooldownMinutes(Number(e.target.value))}
+            min={1}
+            className="w-28 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-sm focus:border-brand-500 focus:outline-none"
+          />
+        </label>
+      </div>
+      <div className="mt-3 flex items-center justify-between">
+        <label className="flex items-center gap-2 text-xs text-slate-600">
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(e) => setEnabled(e.target.checked)}
+            className="h-4 w-4 rounded border-slate-300 text-brand-500 focus:ring-brand-500"
+          />
+          Включено
+        </label>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700"
+          >
+            Отмена
+          </button>
+          <button
+            type="button"
+            onClick={() => void submit()}
+            disabled={!valid}
+            className="rounded-md bg-brand-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Сохранить
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function buildTrigger(kind: NotificationTrigger['kind'], value: number): NotificationTrigger | null {
+  switch (kind) {
+    case 'priceBelow':
+      return { kind: 'priceBelow', value };
+    case 'dropPct':
+      // UI shows percent (e.g. 5), internally evaluate uses ratio (0.05).
+      return { kind: 'dropPct', value: value / 100 };
+    case 'dropAbs':
+      return { kind: 'dropAbs', value };
+    case 'discountAppeared':
+      return { kind: 'discountAppeared' };
+    case 'backInStock':
+      return { kind: 'backInStock' };
+    case 'historicalLow':
+      return { kind: 'historicalLow' };
+    case 'sellerChanged':
+      return null;
+  }
+}
+
+function initialValueString(t: NotificationTrigger | undefined): string {
+  if (!t) return '5';
+  if (t.kind === 'dropPct') return String(Math.round(t.value * 100));
+  if (t.kind === 'dropAbs' || t.kind === 'priceBelow') return String(t.value);
+  return '';
+}
+
+function valueLabel(kind: NotificationTrigger['kind']): string {
+  if (kind === 'dropPct') return 'Порог, %';
+  if (kind === 'dropAbs') return 'Порог, ₽';
+  if (kind === 'priceBelow') return 'Цена, ₽';
+  return '';
+}
+
+function describeTrigger(t: NotificationTrigger): string {
+  switch (t.kind) {
+    case 'priceBelow':       return `Цена ниже ${formatPrice(t.value)}`;
+    case 'dropPct':          return `Падение цены ≥ ${Math.round(t.value * 100)}%`;
+    case 'dropAbs':          return `Падение цены ≥ ${formatPrice(t.value)}`;
+    case 'discountAppeared': return 'Появилась скидка';
+    case 'backInStock':      return 'Снова в наличии';
+    case 'historicalLow':    return 'Исторический минимум';
+    case 'sellerChanged':    return 'Сменился продавец';
+  }
+}
+
+function formatCooldown(minutes: number): string {
+  if (minutes < 60) return `${minutes} мин`;
+  const h = minutes / 60;
+  if (h < 24) return `${h % 1 === 0 ? h : h.toFixed(1)} ч`;
+  const d = h / 24;
+  return `${d % 1 === 0 ? d : d.toFixed(1)} дн`;
 }
 
 function NumericField({

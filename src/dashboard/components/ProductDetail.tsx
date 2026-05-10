@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { sendRpc } from '@/shared/rpc';
-import { formatPrice, formatPercent, formatDateTime } from '@/shared/format';
+import {
+  formatPrice,
+  formatPercent,
+  formatDateTime,
+  formatRelative,
+  explainUnavailable,
+  formatUnavailableLabel,
+} from '@/shared/format';
 import { MARKETPLACE_LABELS } from '@/shared/constants';
 import type { Collection, PricePoint, PriceTier, Product } from '@/shared/types';
 import type { PriceHistoryAggregates, PricePulse } from '@/services/price-history';
@@ -150,6 +157,10 @@ export function ProductDetail({ product, collections, onRemove, onChanged }: Pro
       </header>
 
       <div className="flex-1 space-y-5 overflow-y-auto overscroll-contain px-6 py-5">
+        {product.unavailable && (
+          <UnavailableBanner product={product} onRemove={onRemove} />
+        )}
+
         <DetailsBlock product={product} />
 
         {product.description && (
@@ -536,4 +547,49 @@ function parserStatusLabel(s: string): string {
     default:
       return s;
   }
+}
+
+function UnavailableBanner({
+  product,
+  onRemove,
+}: {
+  product: Product;
+  onRemove: () => void;
+}) {
+  const u = product.unavailable!;
+  return (
+    <section className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+      <div className="flex items-start gap-3">
+        <span aria-hidden className="text-lg">⚠</span>
+        <div className="min-w-0 flex-1">
+          <div className="font-semibold">
+            {formatUnavailableLabel(u.reason)}
+          </div>
+          <p className="mt-1 text-amber-800">{explainUnavailable(u.reason)}</p>
+          <div className="mt-2 text-xs text-amber-700">
+            Замечено {formatRelative(u.since)} назад · последняя проверка{' '}
+            {formatRelative(u.lastCheckedAt)} назад. Маркер исчезнет автоматически,
+            если следующая проверка снова получит цену.
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <a
+              href={product.url}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded border border-amber-300 bg-white px-2.5 py-1 text-xs font-medium text-amber-900 hover:bg-amber-100"
+            >
+              Открыть на сайте ↗
+            </a>
+            <button
+              type="button"
+              onClick={onRemove}
+              className="rounded bg-rose-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-rose-700"
+            >
+              Удалить из отслеживания
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
 }

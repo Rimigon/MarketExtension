@@ -1,4 +1,4 @@
-import { formatDateTime, formatPrice } from '@/shared/format';
+import { formatDateTime, formatPrice, formatUnavailableLabel, explainUnavailable } from '@/shared/format';
 import { MARKETPLACE_LABELS } from '@/shared/constants';
 import type {
   AppNotification,
@@ -171,13 +171,16 @@ function BulkDetails({
 }: {
   details: Extract<NotificationDetails, { kind: 'scheduledBulk' }>;
 }) {
-  const { total, succeeded, failed, changes, errors } = details;
+  const { total, succeeded, failed, changes, errors, unavailable, unavailables } = details;
   return (
     <>
       <Section title="Итог проверки">
         <Row label="Всего товаров" value={String(total)} />
         <Row label="Успешно обновлено" value={String(succeeded)} tone={succeeded ? 'good' : undefined} />
         <Row label="С ошибкой" value={String(failed)} tone={failed ? 'bad' : undefined} />
+        {unavailable != null && unavailable > 0 && (
+          <Row label="Снято с продажи" value={String(unavailable)} />
+        )}
         <Row label="Цена изменилась" value={String(changes.length)} />
       </Section>
 
@@ -216,17 +219,49 @@ function BulkDetails({
       {errors && errors.length > 0 && (
         <Section title="Ошибки">
           <ul className="space-y-2">
-            {errors.map((e) => (
+            {errors.map((e) => {
+              const rawCode = e.missingFields[0] ?? 'unknown';
+              const friendly = explainError(rawCode);
+              const sameAsCode = friendly === rawCode;
+              return (
+                <li
+                  key={e.productId}
+                  className="rounded border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800"
+                >
+                  <div className="line-clamp-1 font-medium text-rose-900">{e.title}</div>
+                  <div className="mt-0.5 break-words text-rose-700">{friendly}</div>
+                  {/* Hide the technical row when the friendly text == the raw
+                      code (no translation available) — otherwise it just shows
+                      the same string twice. */}
+                  {!sameAsCode && (
+                    <div className="mt-1 font-mono text-[11px] text-rose-500">{rawCode}</div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </Section>
+      )}
+
+      {unavailables && unavailables.length > 0 && (
+        <Section title="Снятые с продажи">
+          <p className="mb-2 text-xs text-slate-500">
+            Маркетплейс не вернул цену для этих товаров — это не сбой проверки,
+            а сигнал, что товар, скорее всего, больше не продаётся. В списке
+            они отмечены янтарной плашкой.
+          </p>
+          <ul className="space-y-2">
+            {unavailables.map((u) => (
               <li
-                key={e.productId}
-                className="rounded border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800"
+                key={u.productId}
+                className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
               >
-                <div className="line-clamp-1 font-medium text-rose-900">{e.title}</div>
-                <div className="mt-0.5 break-words text-rose-700">
-                  {explainError(e.missingFields[0] ?? 'unknown')}
+                <div className="line-clamp-1 font-medium">
+                  ⚠ {u.title}
                 </div>
-                <div className="mt-1 font-mono text-[11px] text-rose-500">
-                  {e.missingFields.join(', ')}
+                <div className="mt-0.5 text-amber-800">
+                  <strong>{formatUnavailableLabel(u.reason)}.</strong>{' '}
+                  {explainUnavailable(u.reason)}
                 </div>
               </li>
             ))}
@@ -234,7 +269,7 @@ function BulkDetails({
         </Section>
       )}
 
-      {failed === 0 && (
+      {failed === 0 && (!unavailables || unavailables.length === 0) && (
         <p className="text-sm text-slate-500">
           Все товары обновлены успешно — ошибок не было.
         </p>
@@ -300,7 +335,13 @@ function explainError(reason: string): string {
   if (reason === 'not_implemented:tab_refresh')
     return 'Маркетплейс пока не поддерживает фоновое обновление через API. Откройте страницу товара или нажмите «Обновить» вручную.';
   if (reason === 'tab_load_timeout')
-    return 'Страница не успела загрузиться за 30 секунд. Обычно — медленное соединение или маркетплейс под нагрузкой.';
+    return 'Страница не успела загрузиться за отведённое время. Обычно — медленное соединение или маркетплейс под нагрузкой.';
+  if (reason === 'not_product_page')
+    return 'Товар, скорее всего, снят с продажи: ссылка ведёт уже не на карточку (маркетплейс редиректит на поиск или категорию). Удалите его из отслеживания или обновите URL.';
+  if (reason === 'parser_status_failed' || reason === 'parser_failed')
+    return 'Страница загрузилась, но парсер не смог распознать карточку. Возможно, маркетплейс показал капчу или поменял вёрстку.';
+  if (reason === 'no_price')
+    return 'Карточка открылась, но цены на ней нет — обычно так бывает, когда товар закончился у всех продавцов.';
   if (reason.startsWith('no_response')) return 'Парсер не успел распарсить страницу. Попробуйте ещё раз.';
   if (reason === 'invalid_url') return 'Сохранён некорректный URL товара.';
   if (reason === 'no_nm_in_url') return 'В URL нет идентификатора товара (nm). Обновите ссылку.';

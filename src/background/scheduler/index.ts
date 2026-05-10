@@ -2,7 +2,7 @@ import type { ParsedProduct } from '@/shared/types';
 import { productsRepo } from '@/data/products.repo';
 import { settingsRepo } from '@/data/settings.repo';
 import { notificationsRepo } from '@/data/notifications.repo';
-import { handlers } from '../handlers';
+import { handlers, unavailableReasonFor } from '../handlers';
 import { refreshBadge } from '../notifier';
 import { execute } from './executor';
 
@@ -32,10 +32,15 @@ interface ScheduleSignature {
 interface ScheduledRefreshSummary {
   total: number;
   succeeded: number;
+  /** Real failures only — network errors, parser bugs, timeouts. */
   failed: number;
+  /** Products the marketplace confirmed as delisted/out-of-sale this run.
+   *  Separated from `failed` because they're not really an error — the
+   *  refresh worked fine, the product just isn't there anymore. */
+  unavailable: number;
   changes: { id: string; title: string; before: number; after: number }[];
-  /** Per-product failures with reason, surfaced in the notification detail panel. */
   errors?: { productId: string; title: string; reason: string }[];
+  unavailables?: { productId: string; title: string; reason: string }[];
 }
 
 let runInFlight = false;
@@ -242,19 +247,32 @@ async function runBulkRefresh(): Promise<ScheduledRefreshSummary> {
     total: products.length,
     succeeded: 0,
     failed: 0,
+    unavailable: 0,
     changes: [],
     errors: [],
+    unavailables: [],
   };
   for (const p of products) {
     const before = p.currentPrice;
     try {
       const result = await execute(p.marketplace, p.url, { allowHiddenTab: true });
       if (!result.ok) {
-        summary.failed++;
-        summary.errors!.push({ productId: p.id, title: p.title, reason: result.error ?? 'unknown' });
+        const reason = unavailableReasonFor(result.error);
+        if (reason) {
+          // Marketplace told us the product is gone — treat it as informational,
+          // not as a refresh error. Keeps the bulk-notification's «N ошибок»
+          // count honest (only counts genuine failures).
+          await productsRepo.markUnavailable(p.id, reason);
+          summary.unavailable++;
+          summary.unavailables!.push({ productId: p.id, title: p.title, reason });
+        } else {
+          summary.failed++;
+          summary.errors!.push({ productId: p.id, title: p.title, reason: result.error ?? 'unknown' });
+        }
         continue;
       }
       await persist(result.parsed);
+      await productsRepo.clearUnavailable(p.id);
       summary.succeeded++;
       const after = result.parsed.currentPrice;
       if (before != null && after != null && after !== before) {
@@ -295,6 +313,7 @@ function summaryMessage(summary: ScheduledRefreshSummary): string {
   if (rises) parts.push(`${rises} ↑`);
   if (summary.changes.length === 0 && summary.succeeded > 0) parts.push('без изменений');
   if (summary.failed) parts.push(`${summary.failed} ошибок`);
+  if (summary.unavailable) parts.push(`${summary.unavailable} снято с продажи`);
   return `Обновлено ${summary.succeeded}/${summary.total}${
     parts.length ? ` · ${parts.join(', ')}` : ''
   }`;
@@ -319,12 +338,19 @@ async function notifyComplete(summary: ScheduledRefreshSummary): Promise<void> {
           total: summary.total,
           succeeded: summary.succeeded,
           failed: summary.failed,
+          unavailable: summary.unavailable,
           changes: summary.changes,
           errors: (summary.errors ?? []).map((e) => ({
             productId: e.productId,
             title: e.title,
             status: 'failed',
             missingFields: [e.reason],
+          })),
+          unavailables: (summary.unavailables ?? []).map((u) => ({
+            productId: u.productId,
+            title: u.title,
+            // Cast is safe — runBulkRefresh only pushes UnavailableReason values.
+            reason: u.reason as import('@/shared/types').UnavailableReason,
           })),
         },
       });

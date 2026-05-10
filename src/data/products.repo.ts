@@ -1,6 +1,6 @@
 import { v7 as uuidv7 } from 'uuid';
 import { db } from './db';
-import type { ParsedProduct, PriceGoal, Product } from '@/shared/types';
+import type { ParsedProduct, PriceGoal, Product, UnavailableReason } from '@/shared/types';
 
 export const productsRepo = {
   async getById(id: string): Promise<Product | undefined> {
@@ -117,5 +117,24 @@ export const productsRepo = {
 
   async setGoal(productId: string, goal: PriceGoal | null): Promise<void> {
     await db().products.update(productId, { goal: goal ?? undefined, updatedAt: Date.now() });
+  },
+
+  /** Tag a product as unavailable. Idempotent — preserves the original `since`
+   *  timestamp on repeated calls so the UI can show «снят с продажи 5 дн назад». */
+  async markUnavailable(productId: string, reason: UnavailableReason): Promise<void> {
+    const existing = await db().products.get(productId);
+    if (!existing) return;
+    const now = Date.now();
+    const since = existing.unavailable?.since ?? now;
+    await db().products.update(productId, {
+      unavailable: { reason, since, lastCheckedAt: now },
+    });
+  },
+
+  /** Remove the unavailable marker — call after any successful refresh. */
+  async clearUnavailable(productId: string): Promise<void> {
+    const existing = await db().products.get(productId);
+    if (!existing?.unavailable) return;
+    await db().products.update(productId, { unavailable: undefined });
   },
 };

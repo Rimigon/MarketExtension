@@ -57,6 +57,25 @@ export interface Product {
   collectionIds: string[];
   groupId?: string;
   goal?: PriceGoal;
+  /** Marketplace told us the product is no longer for sale: page redirects to
+   *  search/category, price disappeared, or API returned null. Set by refresh
+   *  handlers when the result is terminally negative; cleared on the next
+   *  successful refresh. UI surfaces this so the user can update the URL or
+   *  remove the product. */
+  unavailable?: ProductUnavailable;
+}
+
+export type UnavailableReason =
+  | 'not_product_page'
+  | 'no_price'
+  | 'api_returned_null';
+
+export interface ProductUnavailable {
+  reason: UnavailableReason;
+  /** First refresh after which we noticed the product is gone. */
+  since: number;
+  /** Most recent refresh that confirmed the state. */
+  lastCheckedAt: number;
 }
 
 export interface PricePoint {
@@ -126,10 +145,18 @@ export type NotificationDetails =
       kind: 'scheduledBulk';
       total: number;
       succeeded: number;
+      /** Real failures only (network, parser bugs, timeouts). Products that
+       *  the marketplace confirmed as delisted/out-of-sale go into
+       *  `unavailable`/`unavailables` instead — they're informational, not errors. */
       failed: number;
+      /** Count of products marked as unavailable during this run. */
+      unavailable?: number;
       changes: { id: string; title: string; before: number; after: number }[];
       /** Per-product errors captured from parserDiagnostics around the run. */
       errors?: { productId: string; title: string; status: ParserStatus; missingFields: string[] }[];
+      /** Per-product unavailable list — separate from errors so the user can
+       *  triage them differently (delete or update URL, vs retry). */
+      unavailables?: { productId: string; title: string; reason: UnavailableReason }[];
     };
 
 export interface AppNotification {

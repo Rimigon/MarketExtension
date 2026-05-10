@@ -288,14 +288,15 @@ export function App() {
   }
 
   const displayMode = settings?.displayMode ?? 'list';
-  // The product list pane gets more horizontal room in card/grid modes — a
-  // 360px lane is too cramped for two-column thumbnails or larger cards.
-  const listColumnPx = displayMode === 'grid' ? 460 : displayMode === 'cards' ? 420 : 360;
+  // Fixed list-column width across all display modes — switching list/cards/grid
+  // should not resize neighbouring panes. 420px is comfortable for cards/grid
+  // (two columns of thumbnails fit) and still readable for the dense list view.
+  const LIST_COLUMN_PX = 420;
 
   return (
     <div
       className="grid h-screen w-full overflow-hidden bg-slate-50"
-      style={{ gridTemplateColumns: `240px ${listColumnPx}px minmax(0, 1fr)` }}
+      style={{ gridTemplateColumns: `240px ${LIST_COLUMN_PX}px minmax(0, 1fr)` }}
     >
       <BulkRefreshToast summary={bulkSummary} onClose={() => setBulkSummary(null)} />
       <Sidebar

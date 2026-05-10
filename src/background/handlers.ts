@@ -27,8 +27,22 @@ import { updateQueue } from './scheduler/queue';
 import { execute as executeUpdate } from './scheduler/executor';
 import { settingsRepo } from '@/data/settings.repo';
 import { db } from '@/data/db';
-import type { PricePoint } from '@/shared/types';
+import type { PricePoint, UnavailableReason } from '@/shared/types';
 import type { PriceTransition } from '@/services/notifications';
+
+/** Map an executor failure code to a `Product.unavailable.reason`, or null when
+ *  the failure is transient (timeout, no network, parser bug) and shouldn't
+ *  flag the product as gone. Shared between manual refresh and bulk refresh. */
+export function unavailableReasonFor(executorError: string | undefined): UnavailableReason | null {
+  switch (executorError) {
+    case 'not_product_page':
+    case 'no_price':
+    case 'api_returned_null':
+      return executorError;
+    default:
+      return null;
+  }
+}
 
 export const handlers: RpcHandlerMap = {
   ping: async () => ({ ok: true, ts: Date.now() }),
@@ -161,7 +175,11 @@ export const handlers: RpcHandlerMap = {
     if (!product) return { ok: false, reason: 'no_product' };
     // WB → JSON-API; Ozon / Yandex Market → hidden inactive tab + on-demand probe.
     const result = await executeUpdate(product.marketplace, product.url, { allowHiddenTab: true });
-    if (!result.ok) return { ok: false, reason: 'fetch_failed', message: result.error };
+    if (!result.ok) {
+      const reason = unavailableReasonFor(result.error);
+      if (reason) await productsRepo.markUnavailable(product.id, reason);
+      return { ok: false, reason: 'fetch_failed', message: result.error };
+    }
 
     // Reuse the product/add path so price-point recording + notifications fire identically.
     const persistResp = await handlers['product/add'](
@@ -169,6 +187,7 @@ export const handlers: RpcHandlerMap = {
       {} as chrome.runtime.MessageSender,
     );
     if ('ok' in persistResp && persistResp.ok) {
+      await productsRepo.clearUnavailable(product.id);
       return { ok: true, product: persistResp.product };
     }
     return { ok: false, reason: 'fetch_failed', message: 'persist_failed' };
