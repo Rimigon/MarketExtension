@@ -5,6 +5,7 @@ import { eventsRepo } from '@/data/events.repo';
 import { notificationsRepo } from '@/data/notifications.repo';
 import { notificationRulesRepo } from '@/data/notification-rules.repo';
 import { collectionsRepo } from '@/data/collections.repo';
+import { parserDiagnosticsRepo } from '@/data/parser-diagnostics.repo';
 import { priceHistory } from '@/services/price-history';
 import { recommendation } from '@/services/recommendation';
 import { stats as statsService } from '@/services/stats';
@@ -50,6 +51,17 @@ export const handlers: RpcHandlerMap = {
   'product/add': async ({ parsed, source }) => {
     const existing = await productsRepo.getByCanonicalUrl(parsed.canonicalUrl);
     const priceSource = source === 'page' ? 'visit' : 'manual';
+    // Record a diagnostic for *every* parsed outcome so the health page can show
+    // a meaningful ok/partial/failed success rate, not just the failures.
+    void parserDiagnosticsRepo
+      .record({
+        marketplace: parsed.marketplace,
+        parserVersion: parsed.parserVersion,
+        status: parsed.parserStatus,
+        url: parsed.url,
+        missingFields: parsed.missingFields ?? [],
+      })
+      .catch((err) => console.warn('[PriceWatch] parserDiagnostics record failed', err));
     if (existing) {
       const prevSnapshot =
         existing.currentPrice != null
@@ -178,6 +190,18 @@ export const handlers: RpcHandlerMap = {
     if (!result.ok) {
       const reason = unavailableReasonFor(result.error);
       if (reason) await productsRepo.markUnavailable(product.id, reason);
+      // Refresh produced no parsed object — log a 'failed' diagnostic so the
+      // health page can attribute the failure to the right marketplace and
+      // expose the executor error code as the missing-fields hint.
+      void parserDiagnosticsRepo
+        .record({
+          marketplace: product.marketplace,
+          parserVersion: product.parserVersion,
+          status: 'failed',
+          url: product.url,
+          missingFields: result.error ? [result.error] : [],
+        })
+        .catch((err) => console.warn('[PriceWatch] parserDiagnostics record failed', err));
       return { ok: false, reason: 'fetch_failed', message: result.error };
     }
 

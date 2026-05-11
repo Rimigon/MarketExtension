@@ -270,5 +270,6 @@ export function extractWildberriesProduct(doc: Document, url: URL): ParsedProduc
     specs: merged.specs,
     parserVersion: PARSER_VERSION,
     parserStatus: status,
+    missingFields: missing.length > 0 ? missing : undefined,
   };
 }

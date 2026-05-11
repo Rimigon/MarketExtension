@@ -11,6 +11,7 @@ export type ScopeFilter =
   | { kind: 'notifications' }
   | { kind: 'stats' }
   | { kind: 'health' }
+  | { kind: 'help' }
   | { kind: 'settings' }
   | { kind: 'collection'; id: string };
 
@@ -119,6 +120,11 @@ export function Sidebar({
           label={t('sidebar.settings')}
           active={scope.kind === 'settings'}
           onClick={() => onScopeChange({ kind: 'settings' })}
+        />
+        <ScopeButton
+          label="Помощь"
+          active={scope.kind === 'help'}
+          onClick={() => onScopeChange({ kind: 'help' })}
         />
       </nav>
 

@@ -498,5 +498,6 @@ export function extractYandexMarketProduct(doc: Document, url: URL): ParsedProdu
     specs: merged.specs,
     parserVersion: PARSER_VERSION,
     parserStatus: status,
+    missingFields: missing.length > 0 ? missing : undefined,
   };
 }

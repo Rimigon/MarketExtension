@@ -230,8 +230,8 @@ export function SettingsPage({ onSettingsSaved }: Props = {}) {
             />
 
             <QuietHoursPanel
-              value={settings.quietHours ?? null}
-              onChange={(quietHours) => void patch({ quietHours: quietHours ?? undefined })}
+              value={settings.quietHours}
+              onChange={(quietHours) => void patch({ quietHours })}
             />
 
             <ExcludedDomainsPanel
@@ -570,35 +570,35 @@ function QuietHoursPanel({
             В это время уведомления будут сохраняться в журнал, но без всплывающих
             окон ОС. Поддерживается переход через полночь (22:00 → 08:00).
           </p>
-          {enabled && (
-            <div className="mt-3 flex items-center gap-2">
-              <label className="text-sm text-slate-700">с</label>
-              <input
-                type="time"
-                value={draft.from}
-                onChange={(e) => {
-                  const next = { ...draft, from: e.target.value };
-                  setDraft(next);
-                  commit(next);
-                }}
-                className="rounded-md border border-slate-200 px-2 py-1 text-sm focus:border-brand-500 focus:outline-none"
-              />
-              <label className="text-sm text-slate-700">до</label>
-              <input
-                type="time"
-                value={draft.to}
-                onChange={(e) => {
-                  const next = { ...draft, to: e.target.value };
-                  setDraft(next);
-                  commit(next);
-                }}
-                className="rounded-md border border-slate-200 px-2 py-1 text-sm focus:border-brand-500 focus:outline-none"
-              />
-              <span className="text-xs text-slate-500">локальное время</span>
-            </div>
-          )}
         </div>
       </label>
+      {enabled && (
+        <div className="mt-3 flex items-center gap-2 pl-7">
+          <span className="text-sm text-slate-700">с</span>
+          <input
+            type="time"
+            value={draft.from}
+            onChange={(e) => {
+              const next = { ...draft, from: e.target.value };
+              setDraft(next);
+              commit(next);
+            }}
+            className="rounded-md border border-slate-200 px-2 py-1 text-sm focus:border-brand-500 focus:outline-none"
+          />
+          <span className="text-sm text-slate-700">до</span>
+          <input
+            type="time"
+            value={draft.to}
+            onChange={(e) => {
+              const next = { ...draft, to: e.target.value };
+              setDraft(next);
+              commit(next);
+            }}
+            className="rounded-md border border-slate-200 px-2 py-1 text-sm focus:border-brand-500 focus:outline-none"
+          />
+          <span className="text-xs text-slate-500">локальное время</span>
+        </div>
+      )}
     </div>
   );
 }

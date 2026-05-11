@@ -2,6 +2,7 @@ import type { ParsedProduct } from '@/shared/types';
 import { productsRepo } from '@/data/products.repo';
 import { settingsRepo } from '@/data/settings.repo';
 import { notificationsRepo } from '@/data/notifications.repo';
+import { parserDiagnosticsRepo } from '@/data/parser-diagnostics.repo';
 import { handlers, unavailableReasonFor } from '../handlers';
 import { refreshBadge } from '../notifier';
 import { execute } from './executor';
@@ -269,6 +270,15 @@ async function runBulkRefresh(): Promise<ScheduledRefreshSummary> {
           summary.failed++;
           summary.errors!.push({ productId: p.id, title: p.title, reason: result.error ?? 'unknown' });
         }
+        void parserDiagnosticsRepo
+          .record({
+            marketplace: p.marketplace,
+            parserVersion: p.parserVersion,
+            status: 'failed',
+            url: p.url,
+            missingFields: result.error ? [result.error] : [],
+          })
+          .catch((err) => console.warn('[PriceWatch] parserDiagnostics record failed', err));
         continue;
       }
       await persist(result.parsed);

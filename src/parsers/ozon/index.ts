@@ -4,26 +4,27 @@ import { extractOzonProduct, isOzonProductPage } from './extract';
 import { OZON_SELECTORS } from './selectors';
 
 /**
- * Anchor strategy: place the «Track price» button right under the product title.
+ * Anchor strategy: place the «Track price» button right under the price block,
+ * because that's where the user's attention is when deciding whether to track.
  *
  * Order of preference:
- *   1. Heading widgets (`webProductHeading` and the H1 it contains).
- *   2. Bare `h1` as the last-resort fallback.
- *   3. Price block (`webPrice` and friends) — used only when the heading isn't
- *      rendered yet (skeleton / regional variants).
+ *   1. Price widgets (`webPrice` and friends) — primary target.
+ *   2. Heading widgets (`webProductHeading` / H1) — fallback when the price
+ *      block hasn't hydrated yet (skeleton / regional variants).
+ *   3. Bare `h1` as last resort.
  *
  * Each candidate must be on screen with non-trivial size — Ozon ships A/B variants where
  * the same selector can match invisible/empty elements.
  */
 function findInjectionAnchor(doc: Document): HTMLElement | null {
   const candidates: HTMLElement[] = [
+    ...OZON_SELECTORS.priceAnchor.flatMap((sel) =>
+      Array.from(doc.querySelectorAll<HTMLElement>(sel)),
+    ),
     ...Array.from(doc.querySelectorAll<HTMLElement>('[data-widget="webProductHeading"]')),
     ...Array.from(doc.querySelectorAll<HTMLElement>('h1[data-widget*="ProductHeading"]')),
     ...Array.from(doc.querySelectorAll<HTMLElement>('h1[itemprop="name"]')),
     ...Array.from(doc.querySelectorAll<HTMLElement>('h1')),
-    ...OZON_SELECTORS.priceAnchor.flatMap((sel) =>
-      Array.from(doc.querySelectorAll<HTMLElement>(sel)),
-    ),
   ];
 
   for (const el of candidates) {

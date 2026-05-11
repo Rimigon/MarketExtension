@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react';
 import { sendRpc } from '@/shared/rpc';
 import { canonicalizeUrl, detectMarketplace } from '@/shared/url';
-import { formatPrice, formatDateTime } from '@/shared/format';
+import {
+  formatPrice,
+  formatDateTime,
+  formatUnavailableLabel,
+} from '@/shared/format';
 import { MARKETPLACE_LABELS } from '@/shared/constants';
 import { resolveThemeId } from '@/shared/themes';
 import { SchedulerHint } from '@/dashboard/components/SchedulerHint';
@@ -260,18 +264,41 @@ export function App() {
         )}
 
         {tab.kind === 'tracked' && (
-          <div className="rounded-md border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-900">
-            <div className="font-medium">Уже отслеживается</div>
-            <div className="mt-1 text-xs text-emerald-800/80">
-              {MARKETPLACE_LABELS[tab.product.marketplace]} · {formatPrice(tab.product.currentPrice)}
+          tab.product.unavailable ? (
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              <div className="flex items-center gap-2 font-medium">
+                <span aria-hidden>⚠</span>
+                Снят с продажи
+              </div>
+              <div className="mt-1 text-xs text-amber-800/80">
+                {MARKETPLACE_LABELS[tab.product.marketplace]} ·{' '}
+                {formatUnavailableLabel(tab.product.unavailable.reason)}
+              </div>
+              <div className="mt-0.5 text-[11px] text-amber-700/80">
+                Замечено {formatDateTime(tab.product.unavailable.since)}. Метка
+                снимется автоматически при следующем успешном обновлении.
+              </div>
+              <button
+                className="mt-2 text-xs text-amber-700 hover:underline"
+                onClick={() => remove(tab.product.id)}
+              >
+                Перестать отслеживать
+              </button>
             </div>
-            <button
-              className="mt-2 text-xs text-emerald-700 hover:underline"
-              onClick={() => remove(tab.product.id)}
-            >
-              Перестать отслеживать
-            </button>
-          </div>
+          ) : (
+            <div className="rounded-md border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-900">
+              <div className="font-medium">Уже отслеживается</div>
+              <div className="mt-1 text-xs text-emerald-800/80">
+                {MARKETPLACE_LABELS[tab.product.marketplace]} · {formatPrice(tab.product.currentPrice)}
+              </div>
+              <button
+                className="mt-2 text-xs text-emerald-700 hover:underline"
+                onClick={() => remove(tab.product.id)}
+              >
+                Перестать отслеживать
+              </button>
+            </div>
+          )
         )}
       </section>
 
@@ -458,11 +485,25 @@ export function App() {
                         type="button"
                         onClick={() => void openProductInDashboard(p.id)}
                         className="min-w-0 flex-1 text-left"
-                        title="Открыть в Dashboard"
+                        title={
+                          p.unavailable
+                            ? `Снят с продажи: ${formatUnavailableLabel(p.unavailable.reason)}. Открыть в Dashboard.`
+                            : 'Открыть в Dashboard'
+                        }
                       >
-                        <span className="line-clamp-2 text-slate-900 hover:underline">
+                        <span
+                          className={`line-clamp-2 hover:underline ${
+                            p.unavailable ? 'text-slate-500 line-through' : 'text-slate-900'
+                          }`}
+                        >
                           {p.title}
                         </span>
+                        {p.unavailable && (
+                          <span className="mt-0.5 inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-amber-800">
+                            <span aria-hidden>⚠</span>
+                            {formatUnavailableLabel(p.unavailable.reason)}
+                          </span>
+                        )}
                         <span className="mt-0.5 block text-xs text-slate-500">
                           {MARKETPLACE_LABELS[p.marketplace]} ·{' '}
                           {formatPrice(p.currentPrice)} · {formatDateTime(p.updatedAt)}

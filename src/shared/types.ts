@@ -212,7 +212,10 @@ export interface UserSettings {
   dailyAtHour: number | null;
   passiveUpdates: boolean;
   scheduledUpdates: boolean;
-  quietHours?: { from: string; to: string };
+  /** null = disabled. Nullable rather than optional because JSON-serialised
+   *  RPC patches drop `undefined` fields, so we couldn't clear the setting via
+   *  `patch({ quietHours: undefined })` — null survives the wire. */
+  quietHours: { from: string; to: string } | null;
   maxNotificationsPerHour: number;
   theme: ThemeId;
   excludedDomains: string[];
@@ -246,6 +249,9 @@ export interface ParsedProduct {
   specs?: ProductSpec[];
   parserVersion: number;
   parserStatus: ParserStatus;
+  /** Fields the parser could not extract. Populated when `parserStatus !== 'ok'`.
+   *  Used by `parserDiagnostics` to highlight what selectors need fixing. */
+  missingFields?: string[];
 }
 
 export interface ParserDiagnostic {

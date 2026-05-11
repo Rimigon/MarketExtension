@@ -23,6 +23,7 @@ export const DEFAULT_SETTINGS = {
   dailyAtHour: null as number | null,
   passiveUpdates: true,
   scheduledUpdates: false,
+  quietHours: null as { from: string; to: string } | null,
   maxNotificationsPerHour: 5,
   theme: 'auto' as const,
   excludedDomains: [] as string[],

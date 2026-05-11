@@ -15,6 +15,7 @@ import { NotificationsList } from './components/NotificationsList';
 import { NotificationDetail } from './components/NotificationDetail';
 import { StatsPage } from './components/StatsPage';
 import { ParserHealthPage } from './components/ParserHealthPage';
+import { HelpPage } from './components/HelpPage';
 import { SettingsPage } from './components/SettingsPage';
 import { BulkRefreshToast, type BulkRefreshSummary } from './components/BulkRefreshToast';
 export type { BulkRefreshSummary } from './components/BulkRefreshToast';
@@ -60,8 +61,12 @@ export function App() {
   const [schedulerBump, setSchedulerBump] = useState(0);
   const bumpScheduler = useCallback(() => setSchedulerBump((v) => v + 1), []);
 
+  // Only the *first* load flips `loading` to true; subsequent refreshes (after
+  // a settings save, a product add, etc.) keep the current UI mounted and just
+  // overwrite the data in place. Otherwise re-mounting the SettingsPage on every
+  // tiny patch resets local state — the user perceives it as «checkbox won't
+  // turn off» / «scrolled back to top».
   const load = useCallback(async () => {
-    setLoading(true);
     const [active, archived, notes, unread, cols, tr, st] = await Promise.all([
       sendRpc('product/list', { archived: false }),
       sendRpc('product/list', { archived: true }),
@@ -327,6 +332,8 @@ export function App() {
         />
       ) : scope.kind === 'health' ? (
         <ParserHealthPage />
+      ) : scope.kind === 'help' ? (
+        <HelpPage />
       ) : scope.kind === 'settings' ? (
         <SettingsPage
           onSettingsSaved={() => {

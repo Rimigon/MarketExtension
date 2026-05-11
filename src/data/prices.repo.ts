@@ -2,11 +2,18 @@ import { v7 as uuidv7 } from 'uuid';
 import { db } from './db';
 import type { Availability, PricePoint, PriceSource } from '@/shared/types';
 
+const SAME_VALUE_DEDUP_WINDOW_MS = 60_000;
+
 export const pricesRepo = {
   /**
-   * Append a point to the history. Returns null if this point is identical to the last
-   * recorded one (same price + availability) — we keep history sparse and only store
-   * actual changes.
+   * Append a point to the history. Every successful check produces a point —
+   * including "checked, no change" — so the chart shows scheduler activity
+   * and the user can see at a glance when the price was last verified.
+   *
+   * Same-value points within a short window are still suppressed to absorb
+   * duplicate fires from a single page-load (SPA re-renders, parser cascade
+   * extracting twice). Old days get compacted by `planCompaction`, so the
+   * raw stream stays bounded.
    */
   async record(args: {
     productId: string;
@@ -15,11 +22,13 @@ export const pricesRepo = {
     availability: Availability;
     source: PriceSource;
   }): Promise<PricePoint | null> {
+    const now = Date.now();
     const last = await this.lastForProduct(args.productId);
     if (
       last &&
       last.price === args.price &&
-      last.availability === args.availability
+      last.availability === args.availability &&
+      now - last.timestamp < SAME_VALUE_DEDUP_WINDOW_MS
     ) {
       return null;
     }
@@ -29,7 +38,7 @@ export const pricesRepo = {
       price: args.price,
       oldPrice: args.oldPrice,
       availability: args.availability,
-      timestamp: Date.now(),
+      timestamp: now,
       source: args.source,
     };
     await db().pricePoints.put(point);
