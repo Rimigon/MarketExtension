@@ -27,7 +27,18 @@ export function App() {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [trends, setTrends] = useState<
-    Record<string, { abs: number; pct: number; firstPrice: number; firstAt: number } | null>
+    Record<
+      string,
+      {
+        abs: number;
+        pct: number;
+        firstPrice: number;
+        firstAt: number;
+        min: number;
+        minAt: number;
+        lastChangeAt: number | null;
+      } | null
+    >
   >({});
   const [loading, setLoading] = useState(true);
   const initialHash = typeof window !== 'undefined' ? window.location.hash : '';
@@ -392,6 +403,7 @@ export function App() {
           <ProductList
             products={visibleProducts}
             trends={trends}
+            collections={collections}
             selectedId={selectedId}
             onSelect={setSelectedId}
             search={search}

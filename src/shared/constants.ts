@@ -25,6 +25,7 @@ export const DEFAULT_SETTINGS = {
   scheduledUpdates: false,
   quietHours: null as { from: string; to: string } | null,
   maxNotificationsPerHour: 5,
+  digestEnabled: false,
   theme: 'auto' as const,
   excludedDomains: [] as string[],
   locale: 'ru' as const,

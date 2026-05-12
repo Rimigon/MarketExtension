@@ -52,7 +52,10 @@ const CHART_HINTS: Record<ChartType, string> = {
 };
 
 export function PriceChart({ points, aggregates, range, onRangeChange }: Props) {
-  const [chartType, setChartType] = useState<ChartType>('line');
+  // Receipt aesthetic: prices change in discrete steps, so the chart should
+  // too. Users can still flip to 'line' / 'area' / 'bars' / 'range' from the
+  // toolbar above.
+  const [chartType, setChartType] = useState<ChartType>('step');
   const cutoff = rangeCutoff(range);
 
   const filtered = useMemo(
@@ -189,11 +192,12 @@ export function PriceChart({ points, aggregates, range, onRangeChange }: Props) 
                   };
                   return (
                     <div className="rounded border border-slate-200 bg-white px-2 py-1 text-xs shadow-sm">
-                      <div className="font-medium text-slate-900">{formatPrice(p.close)}</div>
+                      <div className="pw-num font-medium text-slate-900">{formatPrice(p.close)}</div>
                       <div className="text-slate-500">
-                        мин {formatPrice(p.min)} · макс {formatPrice(p.max)}
+                        мин <span className="pw-num">{formatPrice(p.min)}</span> · макс{' '}
+                        <span className="pw-num">{formatPrice(p.max)}</span>
                       </div>
-                      <div className="text-slate-400">{formatDay(p.ts)}</div>
+                      <div className="pw-num text-slate-400">{formatDay(p.ts)}</div>
                     </div>
                   );
                 }}
@@ -224,11 +228,13 @@ export function PriceChart({ points, aggregates, range, onRangeChange }: Props) 
                   };
                   return (
                     <div className="rounded border border-slate-200 bg-white px-2 py-1 text-xs shadow-sm">
-                      <div className="font-medium text-slate-900">
+                      <div className="pw-num font-medium text-slate-900">
                         {formatPrice(p.min)} – {formatPrice(p.max)}
                       </div>
-                      <div className="text-slate-500">закрытие {formatPrice(p.close)}</div>
-                      <div className="text-slate-400">{formatDay(p.ts)}</div>
+                      <div className="text-slate-500">
+                        закрытие <span className="pw-num">{formatPrice(p.close)}</span>
+                      </div>
+                      <div className="pw-num text-slate-400">{formatDay(p.ts)}</div>
                     </div>
                   );
                 }}
@@ -280,6 +286,7 @@ function commonChartChildren(aggregates: PriceHistoryAggregates, opts?: { catego
         width={70}
         tickFormatter={(v) => formatPrice(Number(v))}
         domain={['dataMin', 'dataMax']}
+        style={{ fontFamily: 'JetBrains Mono, ui-monospace, monospace' }}
       />
       {aggregates.avg != null && (
         <ReferenceLine
@@ -308,8 +315,8 @@ function pointTooltip() {
         if (p.price == null) return null;
         return (
           <div className="rounded border border-slate-200 bg-white px-2 py-1 text-xs shadow-sm">
-            <div className="font-medium text-slate-900">{formatPrice(p.price)}</div>
-            <div className="text-slate-500">
+            <div className="pw-num font-medium text-slate-900">{formatPrice(p.price)}</div>
+            <div className="pw-num text-slate-500">
               {new Intl.DateTimeFormat('ru-RU', {
                 dateStyle: 'short',
                 timeStyle: 'short',

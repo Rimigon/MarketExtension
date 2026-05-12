@@ -6,9 +6,10 @@ import {
   formatDateTime,
   formatUnavailableLabel,
 } from '@/shared/format';
-import { MARKETPLACE_LABELS } from '@/shared/constants';
+import { MARKETPLACE_ACCENT, MARKETPLACE_LABELS } from '@/shared/constants';
 import { resolveThemeId } from '@/shared/themes';
 import { SchedulerHint } from '@/dashboard/components/SchedulerHint';
+import { Logo } from '@/dashboard/components/Logo';
 import type { AppNotification, Product } from '@/shared/types';
 
 type TabState =
@@ -34,9 +35,13 @@ export function App() {
   const [bulkSummary, setBulkSummary] = useState<{ ok: number; fail: number; changes: number } | null>(null);
   const [productSearch, setProductSearch] = useState('');
   const [refreshBump, setRefreshBump] = useState(0);
+  // Defaults match DEFAULT_SETTINGS so the popup renders the canonical look
+  // even before the SW wakes up and answers settings/get.
+  const [colorCoding, setColorCoding] = useState(true);
 
-  // Apply the user's chosen theme to the popup root as well, so light/dark
-  // themes are consistent across the popup, options page and dashboard.
+  // Apply the user's chosen theme and color-coding flag to the popup root,
+  // so light/dark themes and marketplace stripes stay consistent across the
+  // popup, options page and dashboard.
   useEffect(() => {
     let cancelled = false;
     const applyFromSettings = async () => {
@@ -47,6 +52,7 @@ export function App() {
           'data-theme',
           resolveThemeId(resp.settings.theme),
         );
+        setColorCoding(resp.settings.marketplaceColorCoding);
       } catch {
         // SW asleep on first open — fall back to default until refresh().
       }
@@ -223,7 +229,9 @@ export function App() {
     <div className="p-4 space-y-4">
       <header className="space-y-2">
         <div className="flex items-center justify-between">
-          <h1 className="text-lg font-semibold">PriceWatch</h1>
+          <h1 className="text-base">
+            <Logo iconSize={20} />
+          </h1>
           <div className="flex items-center gap-3">
             <button
               className="text-xs text-brand-500 hover:underline"
@@ -252,10 +260,10 @@ export function App() {
         {tab.kind === 'untracked' && (
           <>
             <button
-              className="w-full rounded-md bg-brand-500 px-3 py-2 text-sm font-medium text-white hover:bg-brand-600"
+              className="w-full border border-slate-200 bg-brand-500 px-3 py-3 text-sm font-bold uppercase tracking-receipt text-white hover:bg-brand-600"
               onClick={() => askPageToAdd(tab.tabId)}
             >
-              Добавить текущий товар
+              [ Следить за ценой ]
             </button>
             {addError && (
               <p className="mt-2 text-xs text-rose-600">{addError}</p>
@@ -265,14 +273,26 @@ export function App() {
 
         {tab.kind === 'tracked' && (
           tab.product.unavailable ? (
-            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+            <div
+              className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"
+              style={
+                colorCoding
+                  ? {
+                      boxShadow: `inset 4px 0 0 ${MARKETPLACE_ACCENT[tab.product.marketplace].stripe}`,
+                    }
+                  : undefined
+              }
+            >
               <div className="flex items-center gap-2 font-medium">
                 <span aria-hidden>⚠</span>
                 Снят с продажи
               </div>
-              <div className="mt-1 text-xs text-amber-800/80">
-                {MARKETPLACE_LABELS[tab.product.marketplace]} ·{' '}
-                {formatUnavailableLabel(tab.product.unavailable.reason)}
+              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-amber-800/80">
+                <MarketplaceBadge
+                  marketplace={tab.product.marketplace}
+                  colorCoding={colorCoding}
+                />
+                <span>· {formatUnavailableLabel(tab.product.unavailable.reason)}</span>
               </div>
               <div className="mt-0.5 text-[11px] text-amber-700/80">
                 Замечено {formatDateTime(tab.product.unavailable.since)}. Метка
@@ -286,13 +306,30 @@ export function App() {
               </button>
             </div>
           ) : (
-            <div className="rounded-md border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-900">
-              <div className="font-medium">Уже отслеживается</div>
-              <div className="mt-1 text-xs text-emerald-800/80">
-                {MARKETPLACE_LABELS[tab.product.marketplace]} · {formatPrice(tab.product.currentPrice)}
+            <div
+              className="border border-slate-200 bg-slate-200 p-3 text-sm text-slate-900"
+              style={
+                colorCoding
+                  ? {
+                      boxShadow: `inset 4px 0 0 ${MARKETPLACE_ACCENT[tab.product.marketplace].stripe}`,
+                    }
+                  : undefined
+              }
+            >
+              <div className="text-xs font-bold uppercase tracking-receipt">
+                ● Активно · отслеживается
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-slate-700">
+                <MarketplaceBadge
+                  marketplace={tab.product.marketplace}
+                  colorCoding={colorCoding}
+                />
+                <span>
+                  · <span className="pw-num">{formatPrice(tab.product.currentPrice)}</span>
+                </span>
               </div>
               <button
-                className="mt-2 text-xs text-emerald-700 hover:underline"
+                className="mt-2 text-xs underline hover:opacity-80"
                 onClick={() => remove(tab.product.id)}
               >
                 Перестать отслеживать
@@ -470,6 +507,13 @@ export function App() {
                   <li
                     key={p.id}
                     className="rounded-md border border-slate-200 p-2 text-sm transition hover:border-slate-300 hover:bg-slate-50"
+                    style={
+                      colorCoding
+                        ? {
+                            boxShadow: `inset 4px 0 0 ${MARKETPLACE_ACCENT[p.marketplace].stripe}`,
+                          }
+                        : undefined
+                    }
                   >
                     <div className="flex items-start gap-2">
                       {p.imageUrl ? (
@@ -504,9 +548,15 @@ export function App() {
                             {formatUnavailableLabel(p.unavailable.reason)}
                           </span>
                         )}
-                        <span className="mt-0.5 block text-xs text-slate-500">
-                          {MARKETPLACE_LABELS[p.marketplace]} ·{' '}
-                          {formatPrice(p.currentPrice)} · {formatDateTime(p.updatedAt)}
+                        <span className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-slate-500">
+                          <MarketplaceBadge
+                            marketplace={p.marketplace}
+                            colorCoding={colorCoding}
+                          />
+                          <span>·</span>
+                          <span className="pw-num">{formatPrice(p.currentPrice)}</span>
+                          <span>·</span>
+                          <span className="pw-num">{formatDateTime(p.updatedAt)}</span>
                         </span>
                       </button>
                       <div className="flex shrink-0 items-center gap-0.5">
@@ -553,15 +603,46 @@ export function App() {
   );
 }
 
+function MarketplaceBadge({
+  marketplace,
+  colorCoding,
+}: {
+  marketplace: Product['marketplace'];
+  colorCoding: boolean;
+}) {
+  const accent = MARKETPLACE_ACCENT[marketplace];
+  if (!colorCoding) {
+    return <span>{MARKETPLACE_LABELS[marketplace]}</span>;
+  }
+  return (
+    <span
+      className="inline-flex items-center px-1.5 py-px text-[10px] font-semibold uppercase tracking-receipt"
+      style={{ background: accent.bg, color: accent.stripe }}
+    >
+      {MARKETPLACE_LABELS[marketplace]}
+    </span>
+  );
+}
+
 function filterProducts(products: Product[], q: string): Product[] {
   const needle = q.trim().toLowerCase();
-  if (!needle) return products;
-  return products.filter(
-    (p) =>
-      p.title.toLowerCase().includes(needle) ||
-      (p.brand?.toLowerCase().includes(needle) ?? false) ||
-      (p.sku?.toLowerCase().includes(needle) ?? false),
-  );
+  const filtered = needle
+    ? products.filter(
+        (p) =>
+          p.title.toLowerCase().includes(needle) ||
+          (p.brand?.toLowerCase().includes(needle) ?? false) ||
+          (p.sku?.toLowerCase().includes(needle) ?? false),
+      )
+    : products;
+  // Unavailable items always at the end — mirrors the dashboard's
+  // `unavailableAtEnd` toggle (which defaults on). The relative order inside
+  // each group is preserved from the input (sorted by updatedAt on the SW
+  // side), so this is purely a presentation-layer sink.
+  return [...filtered].sort((a, b) => {
+    const au = a.unavailable ? 1 : 0;
+    const bu = b.unavailable ? 1 : 0;
+    return au - bu;
+  });
 }
 
 function PopupIcon({

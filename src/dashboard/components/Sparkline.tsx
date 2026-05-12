@@ -42,14 +42,23 @@ export function Sparkline({ values, width = 80, height = 24, tone = 'neutral', c
   const span = max - min;
   const stepX = values.length === 1 ? 0 : width / (values.length - 1);
 
-  const points = values
-    .map((v, i) => {
-      const x = i * stepX;
-      // Invert Y — chart down means bigger Y in SVG.
-      const y = span === 0 ? height / 2 : height - 2 - ((v - min) / span) * (height - 4);
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(' ');
+  // Build a step path: each price holds its level until the next sample,
+  // matching the discrete-jumps nature of marketplace prices and the
+  // receipt-aesthetic chart language used in PriceChart.
+  const yAt = (v: number) =>
+    span === 0 ? height / 2 : height - 2 - ((v - min) / span) * (height - 4);
+
+  let d = '';
+  values.forEach((v, i) => {
+    const x = i * stepX;
+    const y = yAt(v);
+    if (i === 0) {
+      d = `M ${x.toFixed(1)} ${y.toFixed(1)}`;
+    } else {
+      // Horizontal hold to current x at previous y, then vertical jump.
+      d += ` H ${x.toFixed(1)} V ${y.toFixed(1)}`;
+    }
+  });
 
   return (
     <svg
@@ -59,13 +68,13 @@ export function Sparkline({ values, width = 80, height = 24, tone = 'neutral', c
       className={className}
       aria-hidden
     >
-      <polyline
+      <path
         fill="none"
         stroke={stroke}
-        strokeWidth={1.5}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        points={points}
+        strokeWidth={1.25}
+        strokeLinecap="square"
+        strokeLinejoin="miter"
+        d={d}
       />
     </svg>
   );

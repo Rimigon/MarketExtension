@@ -154,7 +154,7 @@ export function StatsPage({ onSelectProduct, onOpenHealth }: Props) {
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
             Потенциал экономии
           </h3>
-          <p className="mt-2 text-2xl font-semibold text-emerald-700">
+          <p className="pw-num mt-2 text-2xl font-semibold text-emerald-700">
             {formatPrice(overview.potentialSavings)}
           </p>
           <p className="mt-1 text-xs text-slate-500">

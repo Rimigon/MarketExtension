@@ -3,6 +3,7 @@ import { notificationRulesRepo } from '@/data/notification-rules.repo';
 import { eventsRepo } from '@/data/events.repo';
 import { settingsRepo } from '@/data/settings.repo';
 import { notificationsService, type PriceTransition } from '@/services/notifications';
+import { digestSuppressesIndividualToast } from './digest';
 import type { Product, UserSettings } from '@/shared/types';
 
 const BADGE_BG = '#dc2626';
@@ -69,6 +70,12 @@ export async function processProductUpdate(
       // there's something new, but no system tray noise.
       if (inQuietHours) {
         console.info('[PriceWatch] notification suppressed (quiet hours)', m.rule.id);
+        continue;
+      }
+      if (digestSuppressesIndividualToast(settings)) {
+        // Digest mode: individual toasts are batched into a periodic summary
+        // emitted by background/digest.ts. AppNotification + badge still
+        // surface here so the dashboard feed and action-icon counter stay live.
         continue;
       }
       const recentCount = await notificationsRepo.countSince(now - 60 * 60 * 1000);

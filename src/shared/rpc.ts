@@ -84,8 +84,23 @@ export type RpcMap = {
   'priceTrends/list': {
     request: Record<string, never>;
     response: {
-      /** productId → lifetime change vs the earliest recorded point. null если истории < 2 точек. */
-      trends: Record<string, { abs: number; pct: number; firstPrice: number; firstAt: number } | null>;
+      /** productId → lifetime change vs the earliest recorded point. null если истории < 2 точек.
+       *  Extras `min`/`minAt`/`lastChangeAt` power the "pct-from-min" and
+       *  "changed within Nd" sorts and filters in the dashboard list. */
+      trends: Record<
+        string,
+        {
+          abs: number;
+          pct: number;
+          firstPrice: number;
+          firstAt: number;
+          min: number;
+          minAt: number;
+          /** Timestamp of the most recent point whose price differed from the
+           *  previous point. null when the price has never moved. */
+          lastChangeAt: number | null;
+        } | null
+      >;
     };
   };
   'recommendation/get': {

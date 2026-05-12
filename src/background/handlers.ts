@@ -151,7 +151,18 @@ export const handlers: RpcHandlerMap = {
       if (arr) arr.push(p);
       else byProduct.set(p.productId, [p]);
     }
-    const trends: Record<string, { abs: number; pct: number; firstPrice: number; firstAt: number } | null> = {};
+    const trends: Record<
+      string,
+      {
+        abs: number;
+        pct: number;
+        firstPrice: number;
+        firstAt: number;
+        min: number;
+        minAt: number;
+        lastChangeAt: number | null;
+      } | null
+    > = {};
     for (const [productId, points] of byProduct) {
       if (points.length < 2) {
         trends[productId] = null;
@@ -164,9 +175,31 @@ export const handlers: RpcHandlerMap = {
         trends[productId] = null;
         continue;
       }
+      // Scan once for min + last actual price-change timestamp.
+      let min = sorted[0]!.price;
+      let minAt = sorted[0]!.timestamp;
+      let lastChangeAt: number | null = null;
+      for (let i = 0; i < sorted.length; i++) {
+        const p = sorted[i]!;
+        if (p.price < min) {
+          min = p.price;
+          minAt = p.timestamp;
+        }
+        if (i > 0 && p.price !== sorted[i - 1]!.price) {
+          lastChangeAt = p.timestamp;
+        }
+      }
       const abs = last.price - first.price;
       const pct = abs / first.price;
-      trends[productId] = { abs, pct, firstPrice: first.price, firstAt: first.timestamp };
+      trends[productId] = {
+        abs,
+        pct,
+        firstPrice: first.price,
+        firstAt: first.timestamp,
+        min,
+        minAt,
+        lastChangeAt,
+      };
     }
     return { trends };
   },

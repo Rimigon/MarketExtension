@@ -3,21 +3,237 @@
 @tailwind utilities;
 
 /* ==========================================================================
-   Theme tokens. Each [data-theme="..."] block redefines the same set of
-   custom properties; the override blocks below remap a small set of
-   commonly-used Tailwind utility classes to those tokens so the rest of the
-   app keeps using familiar utilities (bg-white, text-slate-900, …) without
-   per-component theme branching.
+   Fonts. Loaded locally from public/fonts so the extension never reaches out
+   to a CDN at runtime. Manrope is the body grotesque (Latin + Cyrillic);
+   JetBrains Mono is the data/price face used wherever a number needs to read
+   like cash-register tape.
    ========================================================================== */
 
-:root,
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/manrope-latin-400.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/manrope-latin-500.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/manrope-latin-700.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/manrope-cyrillic-400.woff2') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/manrope-cyrillic-500.woff2') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/manrope-cyrillic-700.woff2') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-latin-400.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-latin-500.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-latin-700.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-cyrillic-400.woff2') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-cyrillic-500.woff2') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-cyrillic-700.woff2') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+/* ==========================================================================
+   Theme tokens. The new "receipt" pair is the default — :root carries the
+   light receipt palette and an unset @media (prefers-color-scheme: dark)
+   block flips to receipt-dark before JS has a chance to set data-theme.
+   The legacy 10 palettes remain available for users who choose them in
+   Settings.
+   ========================================================================== */
+
+:root {
+  color-scheme: light;
+  /* Unbleached paper / charcoal. The signal red is the only colour the
+     receipt aesthetic raises its voice for. */
+  --pw-bg-app: #f5f5f0;
+  --pw-bg-panel: #fffefa;
+  --pw-bg-soft: #ececdf;
+  --pw-bg-active: #121212;     /* selection is inversion, not tint */
+  --pw-bg-overlay: #fffefa;
+  --pw-border: #121212;
+  --pw-border-soft: #c8c8bf;
+  --pw-text-primary: #121212;
+  --pw-text-secondary: #3a3a36;
+  --pw-text-muted: #6b6b65;
+  --pw-text-faint: #a2a299;
+  --pw-text-ghost: #c8c8bf;
+  --pw-accent: #121212;        /* primary = charcoal, not coloured */
+  --pw-accent-strong: #000000;
+  --pw-accent-soft: #ececdf;
+  --pw-accent-text: #121212;
+  --pw-signal: #e63946;        /* drops, alerts, destructive */
+  --pw-signal-dim: #b8202c;
+  --pw-signal-soft: #fce6e8;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]),
+  [data-theme='receipt-dark'] {
+    color-scheme: dark;
+    --pw-bg-app: #121212;
+    --pw-bg-panel: #1a1a1a;
+    --pw-bg-soft: #242421;
+    --pw-bg-active: #f5f5f0;
+    --pw-bg-overlay: #1a1a1a;
+    --pw-border: #f5f5f0;
+    --pw-border-soft: #3a3a36;
+    --pw-text-primary: #f5f5f0;
+    --pw-text-secondary: #cdcdc4;
+    --pw-text-muted: #969690;
+    --pw-text-faint: #6b6b65;
+    --pw-text-ghost: #3a3a36;
+    --pw-accent: #f5f5f0;
+    --pw-accent-strong: #ffffff;
+    --pw-accent-soft: #242421;
+    --pw-accent-text: #f5f5f0;
+    --pw-signal: #ff5a67;
+    --pw-signal-dim: #e63946;
+    --pw-signal-soft: #3a1418;
+  }
+}
+
+[data-theme='receipt-light'] {
+  color-scheme: light;
+  --pw-bg-app: #f5f5f0;
+  --pw-bg-panel: #fffefa;
+  --pw-bg-soft: #ececdf;
+  --pw-bg-active: #121212;
+  --pw-bg-overlay: #fffefa;
+  --pw-border: #121212;
+  --pw-border-soft: #c8c8bf;
+  --pw-text-primary: #121212;
+  --pw-text-secondary: #3a3a36;
+  --pw-text-muted: #6b6b65;
+  --pw-text-faint: #a2a299;
+  --pw-text-ghost: #c8c8bf;
+  --pw-accent: #121212;
+  --pw-accent-strong: #000000;
+  --pw-accent-soft: #ececdf;
+  --pw-accent-text: #121212;
+  --pw-signal: #e63946;
+  --pw-signal-dim: #b8202c;
+  --pw-signal-soft: #fce6e8;
+}
+
+[data-theme='receipt-dark'] {
+  color-scheme: dark;
+  --pw-bg-app: #121212;
+  --pw-bg-panel: #1a1a1a;
+  --pw-bg-soft: #242421;
+  --pw-bg-active: #f5f5f0;
+  --pw-bg-overlay: #1a1a1a;
+  --pw-border: #f5f5f0;
+  --pw-border-soft: #3a3a36;
+  --pw-text-primary: #f5f5f0;
+  --pw-text-secondary: #cdcdc4;
+  --pw-text-muted: #969690;
+  --pw-text-faint: #6b6b65;
+  --pw-text-ghost: #3a3a36;
+  --pw-accent: #f5f5f0;
+  --pw-accent-strong: #ffffff;
+  --pw-accent-soft: #242421;
+  --pw-accent-text: #f5f5f0;
+  --pw-signal: #ff5a67;
+  --pw-signal-dim: #e63946;
+  --pw-signal-soft: #3a1418;
+}
+
+/* Legacy palettes — still selectable in Settings. Same token names so the
+   surface-remap section below treats them identically. */
+
 [data-theme='light-default'] {
   color-scheme: light;
-  --pw-bg-app: #f8fafc;       /* page / canvas */
-  --pw-bg-panel: #ffffff;     /* cards, headers */
-  --pw-bg-soft: #f1f5f9;      /* hover, subdued */
-  --pw-bg-active: #eef6ff;    /* selected row */
-  --pw-bg-overlay: #ffffff;   /* tooltips, popovers */
+  --pw-bg-app: #f8fafc;
+  --pw-bg-panel: #ffffff;
+  --pw-bg-soft: #f1f5f9;
+  --pw-bg-active: #eef6ff;
+  --pw-bg-overlay: #ffffff;
   --pw-border: #e2e8f0;
   --pw-border-soft: #f1f5f9;
   --pw-text-primary: #0f172a;
@@ -29,6 +245,9 @@
   --pw-accent-strong: #1d4ed8;
   --pw-accent-soft: #eef6ff;
   --pw-accent-text: #1d4ed8;
+  --pw-signal: #e11d48;
+  --pw-signal-dim: #9f1239;
+  --pw-signal-soft: #ffe4e6;
 }
 
 [data-theme='light-cream'] {
@@ -49,6 +268,9 @@
   --pw-accent-strong: #8e4500;
   --pw-accent-soft: #fbe7c2;
   --pw-accent-text: #7a3d00;
+  --pw-signal: #c0392b;
+  --pw-signal-dim: #9c2a1d;
+  --pw-signal-soft: #fadbd8;
 }
 
 [data-theme='light-mint'] {
@@ -69,6 +291,9 @@
   --pw-accent-strong: #115e59;
   --pw-accent-soft: #d1fae5;
   --pw-accent-text: #115e59;
+  --pw-signal: #dc2626;
+  --pw-signal-dim: #991b1b;
+  --pw-signal-soft: #fee2e2;
 }
 
 [data-theme='light-sky'] {
@@ -89,6 +314,9 @@
   --pw-accent-strong: #075985;
   --pw-accent-soft: #e0f2fe;
   --pw-accent-text: #075985;
+  --pw-signal: #dc2626;
+  --pw-signal-dim: #991b1b;
+  --pw-signal-soft: #fee2e2;
 }
 
 [data-theme='light-rose'] {
@@ -109,6 +337,9 @@
   --pw-accent-strong: #9f1239;
   --pw-accent-soft: #ffe4e6;
   --pw-accent-text: #9f1239;
+  --pw-signal: #e11d48;
+  --pw-signal-dim: #9f1239;
+  --pw-signal-soft: #ffe4e6;
 }
 
 [data-theme='dark-slate'] {
@@ -129,6 +360,9 @@
   --pw-accent-strong: #93c5fd;
   --pw-accent-soft: #1e3a8a;
   --pw-accent-text: #bfdbfe;
+  --pw-signal: #f87171;
+  --pw-signal-dim: #ef4444;
+  --pw-signal-soft: #3a1418;
 }
 
 [data-theme='dark-midnight'] {
@@ -149,6 +383,9 @@
   --pw-accent-strong: #a8c0ff;
   --pw-accent-soft: #1f2c5a;
   --pw-accent-text: #cdd9ff;
+  --pw-signal: #f87171;
+  --pw-signal-dim: #ef4444;
+  --pw-signal-soft: #3a1418;
 }
 
 [data-theme='dark-forest'] {
@@ -169,6 +406,9 @@
   --pw-accent-strong: #6ee7b7;
   --pw-accent-soft: #1f4f3a;
   --pw-accent-text: #a7f3d0;
+  --pw-signal: #fb7185;
+  --pw-signal-dim: #e11d48;
+  --pw-signal-soft: #3a1418;
 }
 
 [data-theme='dark-violet'] {
@@ -189,6 +429,9 @@
   --pw-accent-strong: #c4b5fd;
   --pw-accent-soft: #3d2d6b;
   --pw-accent-text: #ddd6fe;
+  --pw-signal: #fb7185;
+  --pw-signal-dim: #e11d48;
+  --pw-signal-soft: #3a1418;
 }
 
 [data-theme='dark-amber'] {
@@ -209,6 +452,9 @@
   --pw-accent-strong: #fbbf24;
   --pw-accent-soft: #4a3110;
   --pw-accent-text: #fcd34d;
+  --pw-signal: #fb7185;
+  --pw-signal-dim: #e11d48;
+  --pw-signal-soft: #3a1418;
 }
 
 /* Apply tokens to the global page surface. */
@@ -220,92 +466,186 @@ body {
 
 body {
   @apply font-sans antialiased;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Receipt aesthetic: hairline borders read sharper than 1px in non-receipt
+   palettes too, so leave them at 1px globally — Tailwind already does that. */
+
+/* Helper class for numerals that should read like cash-register tape. */
+.pw-num {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas,
+    monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
 }
 
 /* ==========================================================================
-   Surface remap: in any non-default theme, neutral Tailwind utilities used
-   as surfaces / borders / text are remapped to theme tokens. We only target
-   the small set of slate utilities used as “neutral” colors throughout the
-   app — vivid colors (rose, emerald, amber, brand) are intentionally left
-   alone so badges and status chips keep their meaning.
+   Surface remap: in any theme, neutral Tailwind utilities used as surfaces /
+   borders / text are remapped to theme tokens. We only target the small set
+   of slate utilities used as "neutral" colours throughout the app — vivid
+   colours (emerald, amber, brand) keep their meaning, except `rose` which we
+   redirect to the receipt signal so price-drops and destructive actions all
+   speak with the same red voice.
+   The first-listed selector covers both legacy themes (which set data-theme
+   explicitly) AND the new receipt-light/dark (whose tokens live on :root) by
+   way of `html` being matched even without data-theme.
    ========================================================================== */
 
 [data-theme] .bg-white,
-[data-theme] .hover\:bg-white:hover {
+[data-theme] .hover\:bg-white:hover,
+html .bg-white,
+html .hover\:bg-white:hover {
   background-color: var(--pw-bg-panel);
 }
 
 [data-theme] .bg-slate-50,
-[data-theme] .hover\:bg-slate-50:hover {
+[data-theme] .hover\:bg-slate-50:hover,
+html .bg-slate-50,
+html .hover\:bg-slate-50:hover {
   background-color: var(--pw-bg-app);
 }
 
-[data-theme] .bg-slate-50\/40 {
+[data-theme] .bg-slate-50\/40,
+html .bg-slate-50\/40 {
   background-color: var(--pw-bg-app);
 }
 
-[data-theme] .bg-slate-50\/50 {
+[data-theme] .bg-slate-50\/50,
+html .bg-slate-50\/50 {
   background-color: var(--pw-bg-soft);
 }
 
 [data-theme] .bg-slate-100,
-[data-theme] .hover\:bg-slate-100:hover {
+[data-theme] .hover\:bg-slate-100:hover,
+html .bg-slate-100,
+html .hover\:bg-slate-100:hover {
   background-color: var(--pw-bg-soft);
 }
 
 [data-theme] .bg-slate-200,
-[data-theme] .hover\:bg-slate-200:hover {
+[data-theme] .hover\:bg-slate-200:hover,
+html .bg-slate-200,
+html .hover\:bg-slate-200:hover {
   background-color: var(--pw-bg-active);
 }
 
 [data-theme] .bg-brand-50,
-[data-theme] .hover\:bg-brand-50:hover {
+[data-theme] .hover\:bg-brand-50:hover,
+html .bg-brand-50,
+html .hover\:bg-brand-50:hover {
   background-color: var(--pw-accent-soft);
 }
 
+html .text-slate-900,
 [data-theme] .text-slate-900 { color: var(--pw-text-primary); }
+html .text-slate-800,
 [data-theme] .text-slate-800 { color: var(--pw-text-primary); }
+html .text-slate-700,
 [data-theme] .text-slate-700 { color: var(--pw-text-secondary); }
+html .text-slate-600,
 [data-theme] .text-slate-600 { color: var(--pw-text-secondary); }
+html .text-slate-500,
 [data-theme] .text-slate-500 { color: var(--pw-text-muted); }
+html .text-slate-400,
 [data-theme] .text-slate-400 { color: var(--pw-text-faint); }
+html .text-slate-300,
 [data-theme] .text-slate-300 { color: var(--pw-text-ghost); }
 
+html .border-slate-200,
 [data-theme] .border-slate-200 { border-color: var(--pw-border); }
+html .border-slate-300,
 [data-theme] .border-slate-300 { border-color: var(--pw-border); }
+html .border-slate-100,
 [data-theme] .border-slate-100 { border-color: var(--pw-border-soft); }
+html .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
 [data-theme] .divide-slate-100 > :not([hidden]) ~ :not([hidden]) {
   border-color: var(--pw-border-soft);
 }
 
-[data-theme] .placeholder\:text-slate-400::placeholder { color: var(--pw-text-faint); }
+html .placeholder\:text-slate-400::placeholder,
+[data-theme] .placeholder\:text-slate-400::placeholder {
+  color: var(--pw-text-faint);
+}
 
+html .text-brand-500,
 [data-theme] .text-brand-500 { color: var(--pw-accent); }
+html .text-brand-600,
 [data-theme] .text-brand-600 { color: var(--pw-accent-strong); }
+html .text-brand-700,
 [data-theme] .text-brand-700 { color: var(--pw-accent-text); }
+html .bg-brand-500,
 [data-theme] .bg-brand-500 { background-color: var(--pw-accent); }
+html .bg-brand-600,
 [data-theme] .bg-brand-600 { background-color: var(--pw-accent-strong); }
-[data-theme] .hover\:bg-brand-600:hover { background-color: var(--pw-accent-strong); }
+html .hover\:bg-brand-600:hover,
+[data-theme] .hover\:bg-brand-600:hover {
+  background-color: var(--pw-accent-strong);
+}
+html .border-brand-500,
 [data-theme] .border-brand-500 { border-color: var(--pw-accent); }
+html .focus\:border-brand-500:focus,
 [data-theme] .focus\:border-brand-500:focus { border-color: var(--pw-accent); }
-[data-theme] .focus-visible\:ring-brand-500:focus-visible { --tw-ring-color: var(--pw-accent); }
+html .focus-visible\:ring-brand-500:focus-visible,
+[data-theme] .focus-visible\:ring-brand-500:focus-visible {
+  --tw-ring-color: var(--pw-accent);
+}
 
-/* Inputs/selects in dark themes need explicit text+bg or they'll inherit a
-   too-light look from the user agent stylesheet. */
+/* The `bg-brand-500` primary button reads as charcoal-on-paper in the
+   receipt palette. To preserve contrast, force its text to the panel colour
+   when the accent is dark. */
+html .bg-brand-500,
+[data-theme='receipt-light'] .bg-brand-500,
+[data-theme='receipt-dark'] .bg-brand-500 {
+  color: var(--pw-bg-panel);
+}
+
+/* Rose utilities used throughout the codebase as the destructive / alert
+   accent — pipe them through the signal token so palette switches stay
+   coherent. */
+html .text-rose-500,
+[data-theme] .text-rose-500,
+html .text-rose-600,
+[data-theme] .text-rose-600,
+html .text-rose-700,
+[data-theme] .text-rose-700 { color: var(--pw-signal); }
+
+html .bg-rose-50,
+[data-theme] .bg-rose-50,
+html .hover\:bg-rose-50:hover,
+[data-theme] .hover\:bg-rose-50:hover { background-color: var(--pw-signal-soft); }
+
+html .bg-rose-500,
+[data-theme] .bg-rose-500,
+html .bg-rose-600,
+[data-theme] .bg-rose-600 { background-color: var(--pw-signal); }
+
+html .border-rose-300,
+[data-theme] .border-rose-300 { border-color: var(--pw-signal); }
+
+/* Inputs in dark themes (legacy + receipt-dark) need explicit text+bg or they
+   inherit a too-light look from the user-agent stylesheet. */
 [data-theme^='dark-'] input,
 [data-theme^='dark-'] select,
-[data-theme^='dark-'] textarea {
+[data-theme^='dark-'] textarea,
+[data-theme='receipt-dark'] input,
+[data-theme='receipt-dark'] select,
+[data-theme='receipt-dark'] textarea {
   color: var(--pw-text-primary);
   background-color: var(--pw-bg-panel);
   border-color: var(--pw-border);
 }
 [data-theme^='dark-'] input::placeholder,
-[data-theme^='dark-'] textarea::placeholder {
+[data-theme^='dark-'] textarea::placeholder,
+[data-theme='receipt-dark'] input::placeholder,
+[data-theme='receipt-dark'] textarea::placeholder {
   color: var(--pw-text-faint);
 }
 
 /* Selected-row highlight stays readable across themes. */
-[data-theme^='dark-'] .bg-brand-50 {
+[data-theme^='dark-'] .bg-brand-50,
+[data-theme='receipt-dark'] .bg-brand-50 {
   background-color: var(--pw-accent-soft);
 }
 

@@ -234,6 +234,13 @@ export function SettingsPage({ onSettingsSaved }: Props = {}) {
               onChange={(quietHours) => void patch({ quietHours })}
             />
 
+            <Toggle
+              label="Дайджест-режим"
+              description="После каждой плановой проверки приходит одно общее уведомление со сводкой (например, «Обновлено 5/8 · 2 ↓, 1 ↑»). Отдельных всплывающих по минимумам/скидкам не будет — события всё равно сохраняются в ленте и на бейдже. Работает только если выше включено «Плановые обновления»."
+              checked={settings.digestEnabled}
+              onChange={(v) => void patch({ digestEnabled: v })}
+            />
+
             <ExcludedDomainsPanel
               value={settings.excludedDomains}
               onChange={(excludedDomains) => void patch({ excludedDomains })}

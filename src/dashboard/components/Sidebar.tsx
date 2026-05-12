@@ -3,6 +3,7 @@ import { sendRpc } from '@/shared/rpc';
 import type { Collection, Marketplace, Product } from '@/shared/types';
 import { MARKETPLACE_LABELS, MARKETPLACES } from '@/shared/constants';
 import { t } from '@/shared/i18n';
+import { Logo } from './Logo';
 
 export type ScopeFilter =
   | { kind: 'all' }
@@ -76,8 +77,8 @@ export function Sidebar({
 
   return (
     <aside className="flex h-full flex-col overflow-y-auto overscroll-contain border-r border-slate-200 bg-slate-50 px-4 py-6">
-      <div className="flex items-center justify-between px-2">
-        <span className="text-lg font-semibold text-slate-900">PriceWatch</span>
+      <div className="flex items-center justify-between px-2 text-lg text-slate-900">
+        <Logo iconSize={22} />
       </div>
 
       <nav className="mt-6 space-y-0.5 text-sm">

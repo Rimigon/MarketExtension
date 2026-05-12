@@ -75,10 +75,10 @@ export function BulkRefreshToast({ summary, onClose }: Props) {
                   <li key={c.id} className="border-t border-slate-100 pt-1.5 first:border-0 first:pt-0">
                     <div className="line-clamp-1 text-slate-900">{c.title}</div>
                     <div className="flex items-center gap-1.5 text-[11px]">
-                      <span className="text-slate-400 line-through">{formatPrice(c.before)}</span>
+                      <span className="pw-num text-slate-400 line-through">{formatPrice(c.before)}</span>
                       <span className="text-slate-500">→</span>
-                      <span className="font-medium text-slate-900">{formatPrice(c.after)}</span>
-                      <span className={isDrop ? 'text-emerald-700' : 'text-rose-700'}>
+                      <span className="pw-num font-medium text-slate-900">{formatPrice(c.after)}</span>
+                      <span className={`pw-num ${isDrop ? 'text-emerald-700' : 'text-rose-700'}`}>
                         {isDrop ? '−' : '+'}
                         {formatPercent(Math.abs(pct / 100))}
                       </span>

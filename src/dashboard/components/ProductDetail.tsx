@@ -88,11 +88,11 @@ export function ProductDetail({ product, collections, onRemove, onChanged }: Pro
           </div>
           <h2 className="mt-1 text-lg font-semibold text-slate-900">{product.title}</h2>
           <div className="mt-2 flex items-baseline gap-3">
-            <span className="text-2xl font-semibold text-slate-900">
+            <span className="pw-num text-2xl font-semibold text-slate-900">
               {formatPrice(product.currentPrice)}
             </span>
             {product.oldPrice && product.oldPrice > (product.currentPrice ?? 0) && (
-              <span className="text-sm text-slate-400 line-through">
+              <span className="pw-num text-sm text-slate-400 line-through">
                 {formatPrice(product.oldPrice)}
               </span>
             )}
@@ -276,9 +276,9 @@ function Stat({ label, value, hint, tone = 'neutral' }: { label: string; value: 
     tone === 'good' ? 'text-emerald-700' : tone === 'bad' ? 'text-rose-700' : 'text-slate-900';
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-3">
-      <div className="text-xs text-slate-500">{label}</div>
-      <div className={`mt-1 text-base font-semibold ${toneClass}`}>{value}</div>
-      {hint && <div className="mt-0.5 text-xs text-slate-400">{hint}</div>}
+      <div className="text-xs uppercase tracking-receipt text-slate-500">{label}</div>
+      <div className={`pw-num mt-1 text-base font-semibold ${toneClass}`}>{value}</div>
+      {hint && <div className="pw-num mt-0.5 text-xs text-slate-400">{hint}</div>}
     </div>
   );
 }
@@ -326,13 +326,13 @@ function PriceTiersBlock({ tiers, fallback }: { tiers: PriceTier[] | undefined; 
           <li key={`${t.kind}-${i}`} className="grid grid-cols-[180px_1fr] items-baseline gap-2">
             <span className="text-xs text-slate-500">{t.label}</span>
             <span
-              className={
+              className={`pw-num ${
                 t.kind === 'original'
                   ? 'text-slate-400 line-through'
                   : t.kind === 'discounted'
                     ? 'font-semibold text-emerald-700'
                     : 'text-slate-900'
-              }
+              }`}
             >
               {formatPrice(t.amount)}
             </span>

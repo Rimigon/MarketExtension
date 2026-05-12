@@ -29,3 +29,5 @@ skills-lock.json
 .claude/skills/typescript-advanced-types/
 .claude/skills/vite/
 .claude/skills/vitest/
+.claude/skills/playwright-best-practices/
+.claude/settings.local.json

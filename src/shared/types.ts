@@ -183,11 +183,15 @@ export interface Collection {
 export type UpdateIntervalMinutes = 15 | 30 | 60 | 180 | 360 | 720 | 1440;
 
 /**
- * 10 hand-picked palettes (5 light + 5 dark) plus 'auto' which follows the
- * OS prefers-color-scheme. The actual color tokens live in `src/shared/themes.ts`.
+ * Receipt is the default brutalist pair (light + dark). 10 legacy palettes
+ * remain selectable in Settings. 'auto' follows the OS prefers-color-scheme
+ * and resolves to receipt-light / receipt-dark. The actual colour tokens live
+ * in `src/styles/global.css`; the picker metadata in `src/shared/themes.ts`.
  */
 export type ThemeId =
   | 'auto'
+  | 'receipt-light'
+  | 'receipt-dark'
   | 'light-default'
   | 'light-cream'
   | 'light-mint'
@@ -217,6 +221,13 @@ export interface UserSettings {
    *  `patch({ quietHours: undefined })` — null survives the wire. */
   quietHours: { from: string; to: string } | null;
   maxNotificationsPerHour: number;
+  /** Digest mode: per-rule chrome.notifications are suppressed; the only
+   *  popup the user sees is the post-bulk-refresh summary that the scheduler
+   *  already produces. AppNotification rows and the action-badge counter
+   *  continue as usual so the dashboard feed stays informative. Only takes
+   *  effect when `scheduledUpdates` is on — without periodic refreshes there
+   *  is nothing to roll up into a summary. */
+  digestEnabled: boolean;
   theme: ThemeId;
   excludedDomains: string[];
   locale: 'ru' | 'en';

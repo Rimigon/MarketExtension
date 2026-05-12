@@ -1,12 +1,30 @@
 import { useMemo, useState } from 'react';
 import { formatPrice, formatPercent, formatRelative, formatUnavailableLabel } from '@/shared/format';
-import { MARKETPLACE_ACCENT, MARKETPLACE_LABELS } from '@/shared/constants';
-import type { Product, ProductDisplayMode } from '@/shared/types';
+import { MARKETPLACE_ACCENT, MARKETPLACE_LABELS, MARKETPLACES } from '@/shared/constants';
+import type { Collection, Marketplace, Product, ProductDisplayMode } from '@/shared/types';
 import { SchedulerHint } from './SchedulerHint';
 
-export type Trend = { abs: number; pct: number; firstPrice: number; firstAt: number } | null;
+export type Trend = {
+  abs: number;
+  pct: number;
+  firstPrice: number;
+  firstAt: number;
+  min: number;
+  minAt: number;
+  lastChangeAt: number | null;
+} | null;
 
-export type SortKey = 'updated' | 'price-asc' | 'price-desc' | 'discount' | 'title';
+export type SortKey =
+  | 'updated'
+  | 'price-asc'
+  | 'price-desc'
+  | 'discount'
+  | 'title'
+  | 'added'
+  | 'last-change'
+  | 'pct-from-min';
+
+export type ChangedWithin = '24h' | '7d' | '30d' | null;
 
 export interface ListFilters {
   minPrice: number | null;
@@ -14,6 +32,18 @@ export interface ListFilters {
   minDiscount: number | null;
   inStockOnly: boolean;
   withGoalOnly: boolean;
+  /** Pin unavailable products to the end of the list regardless of sort key. */
+  unavailableAtEnd: boolean;
+  /** Empty Set = no marketplace filter (show all). */
+  marketplaces: Set<Marketplace>;
+  /** Empty Set = no collection filter (show all). */
+  collectionIds: Set<string>;
+  favoritesOnly: boolean;
+  changedWithin: ChangedWithin;
+  /** Current price within 5% of historical minimum. */
+  nearHistMin: boolean;
+  /** Has discount: oldPrice > currentPrice or discountPct > 0. */
+  onSaleOnly: boolean;
 }
 
 export const DEFAULT_FILTERS: ListFilters = {
@@ -22,11 +52,26 @@ export const DEFAULT_FILTERS: ListFilters = {
   minDiscount: null,
   inStockOnly: false,
   withGoalOnly: false,
+  unavailableAtEnd: true,
+  marketplaces: new Set(),
+  collectionIds: new Set(),
+  favoritesOnly: false,
+  changedWithin: null,
+  nearHistMin: false,
+  onSaleOnly: false,
+};
+
+const NEAR_MIN_THRESHOLD = 1.05;
+const CHANGED_WITHIN_MS: Record<NonNullable<ChangedWithin>, number> = {
+  '24h': 24 * 60 * 60 * 1000,
+  '7d': 7 * 24 * 60 * 60 * 1000,
+  '30d': 30 * 24 * 60 * 60 * 1000,
 };
 
 interface Props {
   products: Product[];
   trends: Record<string, Trend>;
+  collections: Collection[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   search: string;
@@ -50,6 +95,7 @@ interface Props {
 export function ProductList({
   products,
   trends,
+  collections,
   selectedId,
   onSelect,
   search,
@@ -68,8 +114,14 @@ export function ProductList({
   onDisplayModeChange,
   schedulerBump,
 }: Props) {
-  const filtered = useMemo(() => applyFilters(products, filters), [products, filters]);
-  const sorted = useMemo(() => applySort(filtered, sort), [filtered, sort]);
+  const filtered = useMemo(
+    () => applyFilters(products, filters, trends),
+    [products, filters, trends],
+  );
+  const sorted = useMemo(
+    () => applySort(filtered, sort, filters, trends),
+    [filtered, sort, filters, trends],
+  );
 
   const filtersActive = isFiltersActive(filters);
   const bulkActive = bulkRefreshProgress != null;
@@ -130,9 +182,12 @@ export function ProductList({
               className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs focus:border-brand-500 focus:outline-none"
             >
               <option value="updated">Обновлено</option>
+              <option value="added">Добавлено</option>
+              <option value="last-change">Последнее изменение цены</option>
               <option value="price-asc">Цена ↑</option>
               <option value="price-desc">Цена ↓</option>
               <option value="discount">Скидка</option>
+              <option value="pct-from-min">Ближе к историч. минимуму</option>
               <option value="title">Название</option>
             </select>
           </label>
@@ -157,7 +212,11 @@ export function ProductList({
             tooltip) so each input has room. */}
         {filtersOpen && (
           <div className="mt-3">
-            <FilterPanel filters={filters} onChange={onFiltersChange} />
+            <FilterPanel
+              filters={filters}
+              onChange={onFiltersChange}
+              collections={collections}
+            />
           </div>
         )}
 
@@ -282,7 +341,7 @@ function ListItem({
       </div>
       <div className="flex items-center gap-2 text-right text-sm">
         <div>
-          <div className="font-medium text-slate-900">{formatPrice(p.currentPrice)}</div>
+          <div className="pw-num font-medium text-slate-900">{formatPrice(p.currentPrice)}</div>
           <TrendChip trend={trends[p.id] ?? null} />
           <div
             className="mt-0.5 text-[10px] text-slate-400"
@@ -292,7 +351,7 @@ function ListItem({
           </div>
           {p.goal?.targetPrice != null && (
             <div className="mt-0.5 text-[10px] text-slate-500">
-              цель {formatPrice(p.goal.targetPrice)}
+              цель <span className="pw-num">{formatPrice(p.goal.targetPrice)}</span>
             </div>
           )}
         </div>
@@ -408,7 +467,7 @@ function CardItem({
             </div>
           </div>
           <div className="text-right">
-            <div className="text-base font-semibold text-slate-900">
+            <div className="pw-num text-base font-semibold text-slate-900">
               {formatPrice(p.currentPrice)}
             </div>
             <TrendChip trend={trends[p.id] ?? null} />
@@ -420,7 +479,9 @@ function CardItem({
               {formatRelative(p.updatedAt)}
             </span>
             {p.goal?.targetPrice != null && (
-              <span className="truncate">· цель {formatPrice(p.goal.targetPrice)}</span>
+              <span className="truncate">
+                · цель <span className="pw-num">{formatPrice(p.goal.targetPrice)}</span>
+              </span>
             )}
           </div>
           <div className="flex shrink-0 items-center gap-0.5">
@@ -523,7 +584,7 @@ function GridItem({
           </div>
         )}
         <div className="mt-auto flex items-baseline justify-between gap-2">
-          <span className={`text-sm font-semibold ${p.unavailable ? 'text-slate-500' : 'text-slate-900'}`}>
+          <span className={`pw-num text-sm font-semibold ${p.unavailable ? 'text-slate-500' : 'text-slate-900'}`}>
             {formatPrice(p.currentPrice)}
           </span>
           <TrendChip trend={trends[p.id] ?? null} />
@@ -611,61 +672,192 @@ function DisplayModeIcon({ kind }: { kind: 'list' | 'cards' | 'grid' }) {
 function FilterPanel({
   filters,
   onChange,
+  collections,
 }: {
   filters: ListFilters;
   onChange: (f: ListFilters) => void;
+  collections: Collection[];
 }) {
   function set<K extends keyof ListFilters>(key: K, value: ListFilters[K]) {
     onChange({ ...filters, [key]: value });
   }
+  function toggleSet<T>(current: Set<T>, value: T): Set<T> {
+    const next = new Set(current);
+    if (next.has(value)) next.delete(value);
+    else next.add(value);
+    return next;
+  }
   return (
-    <div className="mt-2 grid grid-cols-2 gap-2 rounded border border-slate-200 bg-white p-3 text-xs">
-      <label className="col-span-2 text-slate-500">Цена, ₽</label>
-      <input
-        type="number"
-        placeholder="от"
-        value={filters.minPrice ?? ''}
-        onChange={(e) => set('minPrice', e.target.value === '' ? null : Number(e.target.value))}
-        className="rounded border border-slate-200 px-2 py-1"
-      />
-      <input
-        type="number"
-        placeholder="до"
-        value={filters.maxPrice ?? ''}
-        onChange={(e) => set('maxPrice', e.target.value === '' ? null : Number(e.target.value))}
-        className="rounded border border-slate-200 px-2 py-1"
-      />
-
-      <label className="col-span-2 mt-1 text-slate-500">Скидка ≥, %</label>
-      <input
-        type="number"
-        placeholder="0"
-        value={filters.minDiscount ?? ''}
-        onChange={(e) => set('minDiscount', e.target.value === '' ? null : Number(e.target.value))}
-        className="col-span-2 rounded border border-slate-200 px-2 py-1"
-      />
-
-      <label className="col-span-2 mt-1 flex items-center gap-2">
+    <div className="mt-2 space-y-3 border border-slate-200 bg-white p-3 text-xs">
+      {/* Price band */}
+      <div className="grid grid-cols-2 gap-2">
+        <label className="col-span-2 text-slate-500">Цена, ₽</label>
         <input
-          type="checkbox"
-          checked={filters.inStockOnly}
-          onChange={(e) => set('inStockOnly', e.target.checked)}
+          type="number"
+          placeholder="от"
+          value={filters.minPrice ?? ''}
+          onChange={(e) => set('minPrice', e.target.value === '' ? null : Number(e.target.value))}
+          className="border border-slate-200 px-2 py-1"
         />
-        Только в наличии
-      </label>
-      <label className="col-span-2 flex items-center gap-2">
         <input
-          type="checkbox"
-          checked={filters.withGoalOnly}
-          onChange={(e) => set('withGoalOnly', e.target.checked)}
+          type="number"
+          placeholder="до"
+          value={filters.maxPrice ?? ''}
+          onChange={(e) => set('maxPrice', e.target.value === '' ? null : Number(e.target.value))}
+          className="border border-slate-200 px-2 py-1"
         />
-        Только с целевой ценой
-      </label>
+      </div>
+
+      {/* Discount threshold */}
+      <div className="grid grid-cols-2 gap-2">
+        <label className="col-span-2 text-slate-500">Скидка ≥, %</label>
+        <input
+          type="number"
+          placeholder="0"
+          value={filters.minDiscount ?? ''}
+          onChange={(e) => set('minDiscount', e.target.value === '' ? null : Number(e.target.value))}
+          className="col-span-2 border border-slate-200 px-2 py-1"
+        />
+      </div>
+
+      {/* Marketplace chips */}
+      <div>
+        <div className="mb-1 text-slate-500">Маркетплейс</div>
+        <div className="flex flex-wrap gap-1.5">
+          {MARKETPLACES.map((m) => {
+            const active = filters.marketplaces.has(m);
+            return (
+              <button
+                key={m}
+                type="button"
+                onClick={() => set('marketplaces', toggleSet(filters.marketplaces, m))}
+                className={`border px-2 py-0.5 text-[11px] ${
+                  active
+                    ? 'border-slate-900 bg-slate-900 text-white'
+                    : 'border-slate-200 text-slate-700 hover:border-slate-300'
+                }`}
+              >
+                {MARKETPLACE_LABELS[m]}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Collection chips */}
+      {collections.length > 0 && (
+        <div>
+          <div className="mb-1 text-slate-500">Коллекция</div>
+          <div className="flex flex-wrap gap-1.5">
+            {collections.map((c) => {
+              const active = filters.collectionIds.has(c.id);
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() =>
+                    set('collectionIds', toggleSet(filters.collectionIds, c.id))
+                  }
+                  className={`border px-2 py-0.5 text-[11px] ${
+                    active
+                      ? 'border-slate-900 bg-slate-900 text-white'
+                      : 'border-slate-200 text-slate-700 hover:border-slate-300'
+                  }`}
+                >
+                  {c.name}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Changed-within radio group */}
+      <div>
+        <div className="mb-1 text-slate-500">Изменилась за</div>
+        <div className="flex flex-wrap gap-1.5">
+          {(['24h', '7d', '30d'] as const).map((p) => {
+            const active = filters.changedWithin === p;
+            return (
+              <button
+                key={p}
+                type="button"
+                onClick={() => set('changedWithin', active ? null : p)}
+                className={`border px-2 py-0.5 text-[11px] ${
+                  active
+                    ? 'border-slate-900 bg-slate-900 text-white'
+                    : 'border-slate-200 text-slate-700 hover:border-slate-300'
+                }`}
+              >
+                {p === '24h' ? '24 часа' : p === '7d' ? '7 дней' : '30 дней'}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Boolean toggles */}
+      <div className="space-y-1">
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={filters.inStockOnly}
+            onChange={(e) => set('inStockOnly', e.target.checked)}
+          />
+          Только в наличии
+        </label>
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={filters.withGoalOnly}
+            onChange={(e) => set('withGoalOnly', e.target.checked)}
+          />
+          Только с целевой ценой
+        </label>
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={filters.favoritesOnly}
+            onChange={(e) => set('favoritesOnly', e.target.checked)}
+          />
+          Только избранные
+        </label>
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={filters.onSaleOnly}
+            onChange={(e) => set('onSaleOnly', e.target.checked)}
+          />
+          Только со скидкой
+        </label>
+        <label
+          className="flex items-center gap-2"
+          title="Текущая цена в пределах 5% от исторического минимума"
+        >
+          <input
+            type="checkbox"
+            checked={filters.nearHistMin}
+            onChange={(e) => set('nearHistMin', e.target.checked)}
+          />
+          Рядом с историческим минимумом (≤ 5%)
+        </label>
+        <label
+          className="flex items-center gap-2"
+          title="Снятые с продажи и недоступные товары всегда в конце списка, независимо от сортировки"
+        >
+          <input
+            type="checkbox"
+            checked={filters.unavailableAtEnd}
+            onChange={(e) => set('unavailableAtEnd', e.target.checked)}
+          />
+          Снятые с продажи — в конец
+        </label>
+      </div>
 
       <button
         type="button"
         onClick={() => onChange(DEFAULT_FILTERS)}
-        className="col-span-2 mt-1 rounded border border-slate-200 px-2 py-1 text-slate-600 hover:bg-slate-50"
+        className="w-full border border-slate-200 px-2 py-1 text-slate-600 hover:bg-slate-50"
       >
         Сбросить фильтры
       </button>
@@ -679,17 +871,54 @@ export function isFiltersActive(f: ListFilters): boolean {
     f.maxPrice != null ||
     f.minDiscount != null ||
     f.inStockOnly ||
-    f.withGoalOnly
+    f.withGoalOnly ||
+    f.marketplaces.size > 0 ||
+    f.collectionIds.size > 0 ||
+    f.favoritesOnly ||
+    f.changedWithin != null ||
+    f.nearHistMin ||
+    f.onSaleOnly
+    // unavailableAtEnd is a sort-presentation toggle, not a narrowing filter,
+    // so the "(•)" indicator stays off when only it differs from defaults.
   );
 }
 
-export function applyFilters(products: Product[], f: ListFilters): Product[] {
+export function applyFilters(
+  products: Product[],
+  f: ListFilters,
+  trends: Record<string, Trend> = {},
+): Product[] {
+  const now = Date.now();
+  const changedCutoff =
+    f.changedWithin != null ? now - CHANGED_WITHIN_MS[f.changedWithin] : null;
   return products.filter((p) => {
     if (f.minPrice != null && (p.currentPrice == null || p.currentPrice < f.minPrice)) return false;
     if (f.maxPrice != null && (p.currentPrice == null || p.currentPrice > f.maxPrice)) return false;
     if (f.minDiscount != null && (p.discountPct == null || p.discountPct < f.minDiscount)) return false;
     if (f.inStockOnly && p.availability !== 'in_stock' && p.availability !== 'limited') return false;
     if (f.withGoalOnly && p.goal?.targetPrice == null) return false;
+    if (f.favoritesOnly && !p.isFavorite) return false;
+    if (f.marketplaces.size > 0 && !f.marketplaces.has(p.marketplace)) return false;
+    if (
+      f.collectionIds.size > 0 &&
+      !p.collectionIds.some((id) => f.collectionIds.has(id))
+    )
+      return false;
+    if (f.onSaleOnly) {
+      const hasDiscount =
+        (p.discountPct != null && p.discountPct > 0) ||
+        (p.oldPrice != null && p.currentPrice != null && p.oldPrice > p.currentPrice);
+      if (!hasDiscount) return false;
+    }
+    if (changedCutoff != null) {
+      const t = trends[p.id];
+      if (!t || t.lastChangeAt == null || t.lastChangeAt < changedCutoff) return false;
+    }
+    if (f.nearHistMin) {
+      const t = trends[p.id];
+      if (!t || p.currentPrice == null || t.min <= 0) return false;
+      if (p.currentPrice / t.min > NEAR_MIN_THRESHOLD) return false;
+    }
     return true;
   });
 }
@@ -791,18 +1020,59 @@ function RefreshIcon({ spinning }: { spinning: boolean }) {
   );
 }
 
-export function applySort(products: Product[], sort: SortKey): Product[] {
+export function applySort(
+  products: Product[],
+  sort: SortKey,
+  filters: ListFilters = DEFAULT_FILTERS,
+  trends: Record<string, Trend> = {},
+): Product[] {
   const arr = [...products];
-  switch (sort) {
-    case 'updated':
-      return arr.sort((a, b) => b.updatedAt - a.updatedAt);
-    case 'price-asc':
-      return arr.sort((a, b) => (a.currentPrice ?? Infinity) - (b.currentPrice ?? Infinity));
-    case 'price-desc':
-      return arr.sort((a, b) => (b.currentPrice ?? -Infinity) - (a.currentPrice ?? -Infinity));
-    case 'discount':
-      return arr.sort((a, b) => (b.discountPct ?? 0) - (a.discountPct ?? 0));
-    case 'title':
-      return arr.sort((a, b) => a.title.localeCompare(b.title, 'ru'));
+
+  const primary = (a: Product, b: Product): number => {
+    switch (sort) {
+      case 'updated':
+        return b.updatedAt - a.updatedAt;
+      case 'added':
+        return b.addedAt - a.addedAt;
+      case 'last-change': {
+        // Most-recently-moved price first. Products without a tracked change
+        // sink (Infinity in the "ago" sense → −Infinity timestamp).
+        const at = trends[a.id]?.lastChangeAt ?? -Infinity;
+        const bt = trends[b.id]?.lastChangeAt ?? -Infinity;
+        return bt - at;
+      }
+      case 'price-asc':
+        return (a.currentPrice ?? Infinity) - (b.currentPrice ?? Infinity);
+      case 'price-desc':
+        return (b.currentPrice ?? -Infinity) - (a.currentPrice ?? -Infinity);
+      case 'discount':
+        return (b.discountPct ?? 0) - (a.discountPct ?? 0);
+      case 'pct-from-min': {
+        // Closest to historical minimum first: pct = current / min.
+        // Missing trend or zero min ⇒ sink to the end.
+        const ratio = (p: Product): number => {
+          const t = trends[p.id];
+          if (!t || p.currentPrice == null || t.min <= 0) return Infinity;
+          return p.currentPrice / t.min;
+        };
+        return ratio(a) - ratio(b);
+      }
+      case 'title':
+        return a.title.localeCompare(b.title, 'ru');
+    }
+  };
+
+  // When the toggle is on, unavailable products always sink to the end
+  // regardless of the primary sort. Ties within each group fall back to the
+  // primary sort. This is intentionally orthogonal to the sort key — the user
+  // expects to see active listings first even when sorted by title or price.
+  if (filters.unavailableAtEnd) {
+    return arr.sort((a, b) => {
+      const au = a.unavailable ? 1 : 0;
+      const bu = b.unavailable ? 1 : 0;
+      if (au !== bu) return au - bu;
+      return primary(a, b);
+    });
   }
+  return arr.sort(primary);
 }

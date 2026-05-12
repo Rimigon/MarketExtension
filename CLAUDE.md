@@ -11,6 +11,7 @@ Browser extension (Manifest V3) для отслеживания цен на Ozon
 - **Локализация**: RU-only в MVP (i18n-структура заложена).
 - **Дистрибуция**: dev/unpacked. Web Store — после стабилизации.
 - **Стек**: Manifest V3 · TypeScript 5 (strict) · React 18 · Vite + @crxjs/vite-plugin · Dexie 4 · Zustand · Tailwind 3 · Recharts · Vitest.
+- **Шрифты**: Manrope (sans) + JetBrains Mono (data/prices) лежат локально в `public/fonts/` (latin + cyrillic, 400/500/700). Никаких runtime-запросов к CDN.
 
 ## Команды
 
@@ -56,6 +57,18 @@ content scripts (per site)  →  background service worker  →  Dexie / Indexed
 - **Парсеры**: каждый — отдельная папка `<mp>/{index.ts, extract.ts, selectors.ts}`. `index.ts` экспортирует объект, реализующий `Parser`.
 - **Магические числа**: в `src/shared/constants.ts` или рядом с использованием как именованная константа.
 
+## Дизайн-система
+
+Базовый язык — Receipt brutalist: высокая плотность, 1px бордюры, никаких теней и скруглений, моноширинные цифры. Применяется ко всем UI-слоям независимо от выбранной цветовой схемы.
+
+- **Темы** (`src/styles/global.css`, каталог в `src/shared/themes.ts`): `receipt-light` + `receipt-dark` — дефолтная пара, переключается по `prefers-color-scheme` ещё до того, как JS успеет проставить `data-theme` (`:root` + `@media (prefers-color-scheme: dark)` на `:root:not([data-theme])`). 10 «классических» палитр (`light-default`, `dark-slate`, и т.д.) остались как опции в Settings — все они шарят те же CSS-токены (`--pw-bg-*`, `--pw-text-*`, `--pw-accent-*`, `--pw-signal*`).
+- **Tailwind override** (`tailwind.config.ts`): `borderRadius` и `boxShadow` забиты в `0` / `none` для всех ключей, чтобы существующие `rounded-md` / `shadow-sm` в компонентах автоматически становились плоскими — без правки каждого className. Сделано осознанно: новый `rounded-*` в коде не даст «мягкого» эффекта, и это правильно.
+- **Сигнал-красный** (`--pw-signal: #E63946` в receipt-light, `#FF5A67` в receipt-dark): единственный цветовой акцент, на который дизайн повышает голос. Утилиты `rose-*` ремаппятся в `--pw-signal` через `global.css`, так что «destructive» / drop-индикаторы в коде остаются на привычных `text-rose-600` / `bg-rose-50`.
+- **Моноширинные цифры**: helper `.pw-num` (`font-mono` + `tabular-nums` + tracking -0.01em) клеится на любой элемент с ценой/количеством. Заголовочные цены в `ProductDetail`, цены в `ProductList`/`popup`, тултипы и тики Y-axis в `PriceChart`, summary-тосты — везде через `pw-num`.
+- **Графики** (`PriceChart`, `Sparkline`): step-чарты по умолчанию — цена меняется дискретными скачками, и линия их не интерполирует. Sparkline рисует `<path>` с `H/V`-командами и `strokeLinecap="square"`.
+- **Логотип**: `<Logo>` (`src/dashboard/components/Logo.tsx`) — inline SVG (charcoal-квадрат + ниспадающий step-chart paper-цвета + signal-red маркер на последней ступени) + Manrope Bold "PriceWatch" wordmark. Используется в хедере popup и сайдбаре dashboard. Browser-action иконки 16/32/48/128 растеризуются из `public/icons/icon.svg` через `node scripts/build-icons.mjs` (Playwright Chromium).
+- **Цветовая маркировка маркетплейсов** (`MARKETPLACE_ACCENT` в `src/shared/constants.ts`): inset-полоска слева + цветной бейдж маркетплейса. Тоггл `marketplaceColorCoding` в Settings; popup и dashboard читают одно и то же поле, поведение синхронно.
+
 ## Storage и миграции
 
 - Версия схемы — в `src/data/db.ts`. Текущая: `v1`.
@@ -94,20 +107,18 @@ content scripts (per site)  →  background service worker  →  Dexie / Indexed
 - **Executor** (`src/background/scheduler/executor.ts`) — `wildberries` → `fetchWbProductFromApi`; `ozon` / `yandex-market` возвращают `not_implemented:tab_refresh` (drop'аются после `MAX_ATTEMPTS`).
 - **Параметры**: rate limit `8с/marketplace`, max `5 задач/tick`, jitter ±20%, backoff `30с → 2м → 10м → 1ч`, MAX_ATTEMPTS=4.
 - **Hooks**: `applySettings()` дёргается из `settings/update` handler — включает/выключает scheduler динамически. `reconcileQueue()` — после `product/add`/`product/remove`.
-- **Settings UI** (`src/options/App.tsx`): `scheduledUpdates` toggle, `updateInterval` (15/30/60/180), `passiveUpdates`, `maxNotificationsPerHour`.
+- **Settings UI** (`src/dashboard/components/SettingsPage.tsx`): `scheduledUpdates` toggle, `updateInterval` (15/30/60/180), `passiveUpdates`, `maxNotificationsPerHour`, `quietHours`, `digestEnabled`.
 
 ## Уведомления
-
-Реализованы базовые правила (этап 4). Quiet hours / дайджесты / лимит per hour — V1, ещё не реализовано.
 
 - **NotificationService** (`src/services/notifications.ts`) — чистая функция `evaluate(product, transition, rules) → matches[]`. Триггеры: `priceBelow`, `dropPct`, `dropAbs`, `discountAppeared`, `backInStock`, `historicalLow`, `sellerChanged` (заглушка).
 - **Notifier** (`src/background/notifier.ts`) — оркестратор: применяет evaluate, проверяет cooldown по (productId, ruleId) через `notificationsRepo.lastFiredAt`, пишет AppNotification, дёргает `chrome.notifications.create` и обновляет badge через `chrome.action.setBadgeText`.
 - **Defaults** — при первом старте SW (`bootstrap()`) сидим три глобальных правила: drop ≥ 5% (cooldown 12ч), backInStock (24ч), historicalLow (24ч).
 - **Триггер** — вызывается из `product/add` handler после записи pricePoint. Транзишен включает `historyMinBefore` (минимум до текущего апдейта) для historicalLow.
 - **Глобальные vs per-product** — `notificationRulesRepo.listForProduct(id)` возвращает глобальные + правила scope=product этого id.
-- **Клик по chrome notification** — открывает dashboard в новой вкладке.
-
-V1 (когда дойдём): quiet hours → дайджест, лимит per hour, max-cooldown по `settings.minCooldown`, исключённые домены.
+- **Quiet hours** + **excludedDomains** + **maxNotificationsPerHour** — три «приглушающих» канала: AppNotification и badge продолжают писаться, но `chrome.notifications.create` пропускается.
+- **Digest mode** (`src/background/digest.ts`): `digestEnabled` × `scheduledUpdates` → `digestSuppressesIndividualToast()` глушит per-rule toasts. Сводный тост — это уже существующее post-bulk-refresh уведомление scheduler-а («Обновлено 5/8 · 2 ↓, 1 ↑»), отдельного таймера/alarm нет. Когда `scheduledUpdates` off, `digestEnabled` — no-op.
+- **Клик по chrome notification** — открывает dashboard в новой вкладке (`#notifications/<id>` для rule-toast, `#notifications` для bulk/digest).
 
 ## Тестирование
 
@@ -158,12 +169,14 @@ src/
   popup/         # action popup
   dashboard/     # full-page UI
   options/       # настройки
-  styles/        # tailwind entrypoints
+  styles/        # tailwind entrypoints + @font-face + theme tokens
 tests/
   parsers/       # fixtures + unit-тесты парсеров
   data/          # repos на fake-indexeddb
   shared/        # утилиты (url, format, ...)
-public/icons/    # PNG-иконки 16/32/48/128
+public/icons/    # PNG-иконки 16/32/48/128 + icon.svg исходник
+public/fonts/    # Manrope + JetBrains Mono (latin + cyrillic, 400/500/700)
+scripts/         # одноразовые скрипты (build-icons.mjs — растеризация SVG)
 .claude/skills/  # специфичные знания (парсеры, MV3, Dexie)
 ```
 

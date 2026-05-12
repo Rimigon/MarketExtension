@@ -7,7 +7,6 @@ import { setLocale } from '@/shared/i18n';
 import { refreshBadge, registerNotificationClick } from './notifier';
 import { startScheduler } from './scheduler';
 import { registerMaintenanceAlarm, startMaintenance } from './maintenance';
-
 console.log('[PriceWatch] background service worker booted at', new Date().toISOString());
 
 // Register synchronously at module init so MV3 can wake the SW from a
