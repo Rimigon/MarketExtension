@@ -2,6 +2,8 @@ import { useState, type CSSProperties } from 'react';
 import { sendRpc } from '@/shared/rpc';
 import type { Marketplace, ParsedProduct, Product } from '@/shared/types';
 import { formatPrice } from '@/shared/format';
+import { MARKETPLACE_ACCENT, MARKETPLACE_LABELS } from '@/shared/constants';
+import { otherMarketplaces, searchOnMarketplace } from '@/shared/url';
 
 type Status = 'idle' | 'tracked' | 'pending' | 'error';
 
@@ -207,7 +209,83 @@ export function TrackButton({ parsed, initialProduct, onChange }: Props) {
           {status === 'pending' ? theme.pendingLabel : theme.ctaLabel}
         </button>
       )}
+      <CrossMarketplaceRow marketplace={parsed.marketplace} title={parsed.title} />
       {error && <div style={{ fontSize: 12, color: '#b91c1c' }}>Ошибка: {error}</div>}
+    </div>
+  );
+}
+
+/**
+ * Inline-styled "look up this product on the other marketplaces" row. Mirrors
+ * `src/dashboard/components/CrossMarketplaceLinks.tsx` but lives in the
+ * Shadow-DOM injection layer so we cannot use Tailwind — every rule is a
+ * literal `style` object.
+ */
+function CrossMarketplaceRow({
+  marketplace,
+  title,
+}: {
+  marketplace: Marketplace;
+  title: string;
+}) {
+  const others = otherMarketplaces(marketplace);
+  const [copied, setCopied] = useState<Marketplace | null>(null);
+  if (others.length === 0) return null;
+
+  async function go(target: Marketplace) {
+    await searchOnMarketplace(target, title);
+    setCopied(target);
+    setTimeout(() => setCopied((c) => (c === target ? null : c)), 1800);
+  }
+
+  return (
+    <div
+      style={{
+        display: 'inline-flex',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        gap: 6,
+        fontSize: 11,
+        marginTop: 2,
+      }}
+    >
+      <span style={{ color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
+        Найти на:
+      </span>
+      {others.map((m) => {
+        const accent = MARKETPLACE_ACCENT[m];
+        return (
+          <button
+            key={m}
+            type="button"
+            onClick={() => void go(m)}
+            title={`Скопировать название и открыть поиск на ${MARKETPLACE_LABELS[m]}`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              border: `1px solid ${accent.stripe}`,
+              background: accent.bg,
+              color: accent.stripe,
+              padding: '2px 8px',
+              fontSize: 11,
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: '0.02em',
+              fontFamily: 'inherit',
+              cursor: 'pointer',
+            }}
+          >
+            <span aria-hidden>↗</span>
+            <span>{MARKETPLACE_LABELS[m]}</span>
+            {copied === m && (
+              <span style={{ marginLeft: 4, fontWeight: 400, textTransform: 'none', letterSpacing: 0, opacity: 0.7 }}>
+                · скопировано
+              </span>
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }

@@ -4,28 +4,25 @@ import { extractOzonProduct, isOzonProductPage } from './extract';
 import { OZON_SELECTORS } from './selectors';
 
 /**
- * Anchor strategy: place the «Track price» button right under the price block,
- * because that's where the user's attention is when deciding whether to track.
+ * Anchor strategy: pin the «Следить» button + cross-marketplace row directly
+ * under the price block. We try every price-widget variant Ozon ships across
+ * A/B layouts in turn; the first one that's rendered and non-trivially sized
+ * wins.
  *
- * Order of preference:
- *   1. Price widgets (`webPrice` and friends) — primary target.
- *   2. Heading widgets (`webProductHeading` / H1) — fallback when the price
- *      block hasn't hydrated yet (skeleton / regional variants).
- *   3. Bare `h1` as last resort.
+ * We deliberately do NOT fall back to the heading widget or `h1` here. On
+ * SPA navigations Ozon hydrates the heading first and the price block a beat
+ * later — if we accepted a heading fallback, the button would flicker under
+ * the title and then re-inject under the price once the next MutationObserver
+ * tick fired (the "через раз под названием то под ценой" bug). Returning null
+ * keeps the button hidden until a real price anchor exists.
  *
- * Each candidate must be on screen with non-trivial size — Ozon ships A/B variants where
- * the same selector can match invisible/empty elements.
+ * Size filter is intentionally lax (≥ 20px wide, ≥ 10px tall) so thin price
+ * widgets during partial hydration aren't rejected.
  */
 function findInjectionAnchor(doc: Document): HTMLElement | null {
-  const candidates: HTMLElement[] = [
-    ...OZON_SELECTORS.priceAnchor.flatMap((sel) =>
-      Array.from(doc.querySelectorAll<HTMLElement>(sel)),
-    ),
-    ...Array.from(doc.querySelectorAll<HTMLElement>('[data-widget="webProductHeading"]')),
-    ...Array.from(doc.querySelectorAll<HTMLElement>('h1[data-widget*="ProductHeading"]')),
-    ...Array.from(doc.querySelectorAll<HTMLElement>('h1[itemprop="name"]')),
-    ...Array.from(doc.querySelectorAll<HTMLElement>('h1')),
-  ];
+  const candidates: HTMLElement[] = OZON_SELECTORS.priceAnchor.flatMap((sel) =>
+    Array.from(doc.querySelectorAll<HTMLElement>(sel)),
+  );
 
   for (const el of candidates) {
     let rect: DOMRect | null = null;
@@ -34,7 +31,7 @@ function findInjectionAnchor(doc: Document): HTMLElement | null {
     } catch {
       continue;
     }
-    if (!rect || rect.width < 50 || rect.height < 10) continue;
+    if (!rect || rect.width < 20 || rect.height < 10) continue;
     return el;
   }
   return null;

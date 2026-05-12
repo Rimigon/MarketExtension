@@ -15,6 +15,7 @@ import { computePulse } from '@/services/price-history';
 import { PriceChart } from './PriceChart';
 import type { Range } from '@/services/price-history';
 import { ProductMeta } from './ProductMeta';
+import { CrossMarketplaceLinks } from './CrossMarketplaceLinks';
 
 interface Props {
   product: Product;
@@ -106,6 +107,13 @@ export function ProductDetail({ product, collections, onRemove, onChanged }: Pro
                   +{formatPercent(lifetimeTrend.pct)} с момента добавления
                 </span>
               ))}
+          </div>
+          <div className="mt-3">
+            <CrossMarketplaceLinks
+              marketplace={product.marketplace}
+              title={product.title}
+              variant="block"
+            />
           </div>
         </div>
         <div className="flex flex-col items-end gap-2">

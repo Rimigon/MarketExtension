@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { sendRpc } from '@/shared/rpc';
 import type { Marketplace, PricePoint, Product } from '@/shared/types';
 import type { PriceHistoryAggregates } from '@/services/price-history';
@@ -11,9 +11,22 @@ import {
 
 interface Props {
   product: Product;
+  /** Host element from the injector. We mutate its style to drag the floater
+   *  around the page, and persist the resulting position per-marketplace.
+   *  Required for drag support; omit for static-position rendering (tests). */
+  hostEl?: HTMLElement;
   /** Called when the user clicks «убрать» — parent tears down the floater. */
   onUntrack?: () => void;
 }
+
+interface FloaterPosition {
+  left: number;
+  top: number;
+}
+
+const FLOATER_POS_KEY_PREFIX = 'pricewatch:floater-pos:';
+/** Minimum viewport gap kept around the host when clamping a drag operation. */
+const VIEWPORT_PADDING = 8;
 
 interface MarketplaceTheme {
   /** CSS color for the accent (price, links, sparkline). */
@@ -50,12 +63,31 @@ const PERIOD_DAYS = 30;
  * panel. Renders in a Shadow DOM (inline styles only) so the host page's CSS
  * can't bleed in.
  */
-export function StatsFloater({ product, onUntrack }: Props) {
+export function StatsFloater({ product, hostEl, onUntrack }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [points, setPoints] = useState<PricePoint[] | null>(null);
   const [aggregates, setAggregates] = useState<PriceHistoryAggregates | null>(null);
   const [busy, setBusy] = useState(false);
   const theme = THEMES[product.marketplace];
+
+  // Load the saved position on mount (per-marketplace, so WB and Ozon can have
+  // different homes). If the user has never dragged, the host stays at its
+  // injector-set default (bottom-right with 16px gap).
+  useEffect(() => {
+    if (!hostEl) return;
+    const key = `${FLOATER_POS_KEY_PREFIX}${product.marketplace}`;
+    let cancelled = false;
+    chrome.storage?.local.get(key, (data) => {
+      if (cancelled) return;
+      const saved = data?.[key] as FloaterPosition | undefined;
+      if (saved && typeof saved.left === 'number' && typeof saved.top === 'number') {
+        applyHostPosition(hostEl, clampToViewport(saved));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [hostEl, product.marketplace]);
 
   const load = useCallback(async () => {
     const since = Date.now() - PERIOD_DAYS * 24 * 60 * 60 * 1000;
@@ -112,30 +144,50 @@ export function StatsFloater({ product, onUntrack }: Props) {
   const wrapperStyle: CSSProperties = {
     fontFamily: theme.fontFamily,
     color: '#0f172a',
-    // Right-anchor so the expanded panel grows leftward without resizing the
-    // page or causing horizontal scroll. The host element is already pinned to
-    // the viewport corner (position: fixed bottom-right with 16px gap).
-    display: 'flex',
+    // The wrapper is a positioning context for the absolute-positioned
+    // expanded panel (which grows UPWARD from the pill, see Panel container
+    // below). The pill itself sits in normal flow at the wrapper's top —
+    // i.e. exactly where the user clicked, regardless of whether the host
+    // is anchored bottom-right (default) or top-left (after a drag).
+    position: 'relative',
+    display: 'inline-flex',
     flexDirection: 'column',
     alignItems: 'flex-end',
-    gap: 8,
     pointerEvents: 'none',
   };
+
+  const onDragStart = useDragHandle(hostEl, product.marketplace);
 
   return (
     <div style={wrapperStyle}>
       {expanded && (
-        <Panel
-          theme={theme}
-          product={product}
-          aggregates={aggregates}
-          points={points}
-          busy={busy}
-          onRefresh={() => void refreshNow()}
-          onOpenDashboard={() => void openDashboard()}
-          onUntrack={() => void untrack()}
-          onClose={() => setExpanded(false)}
-        />
+        <div
+          style={{
+            // Anchor the panel ABOVE the pill regardless of where the
+            // floater currently lives. `bottom: 100%` plants the panel's
+            // bottom edge at the pill's top edge; the 8px margin then
+            // creates the gap. `right: 0` keeps the panel's right edge
+            // aligned with the pill's right edge so the visual stack reads
+            // as one column.
+            position: 'absolute',
+            right: 0,
+            bottom: '100%',
+            marginBottom: 8,
+            pointerEvents: 'none',
+          }}
+        >
+          <Panel
+            theme={theme}
+            product={product}
+            aggregates={aggregates}
+            points={points}
+            busy={busy}
+            onRefresh={() => void refreshNow()}
+            onOpenDashboard={() => void openDashboard()}
+            onUntrack={() => void untrack()}
+            onClose={() => setExpanded(false)}
+          />
+        </div>
       )}
       <CollapsedPill
         theme={theme}
@@ -144,9 +196,102 @@ export function StatsFloater({ product, onUntrack }: Props) {
         lastChangePct={lastChangePct}
         expanded={expanded}
         onToggle={() => setExpanded((v) => !v)}
+        onDragStart={onDragStart}
       />
     </div>
   );
+}
+
+/**
+ * Hook that returns a `mousedown` handler turning the floater's drag handle
+ * into a viewport-clamped grab interaction. Position is saved to
+ * chrome.storage.local on release so it survives page reloads. Per-marketplace
+ * key — WB and Ozon get independent positions, useful when one site has a
+ * chat widget covering the bottom-right corner and the other doesn't.
+ */
+function useDragHandle(
+  hostEl: HTMLElement | undefined,
+  marketplace: Marketplace,
+): (e: ReactPointerLikeEvent) => void {
+  // useRef so the global mousemove/mouseup listeners (attached once per drag)
+  // see the latest offsets without re-attaching on every render.
+  const dragRef = useRef<{
+    offsetX: number;
+    offsetY: number;
+  } | null>(null);
+
+  return useCallback(
+    (e: ReactPointerLikeEvent) => {
+      if (!hostEl) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const rect = hostEl.getBoundingClientRect();
+      dragRef.current = {
+        offsetX: e.clientX - rect.left,
+        offsetY: e.clientY - rect.top,
+      };
+      // Switch positioning model to top/left so we can place freely. The
+      // host was set to right/bottom by the injector — clear those.
+      hostEl.style.right = 'auto';
+      hostEl.style.bottom = 'auto';
+      hostEl.style.left = `${rect.left}px`;
+      hostEl.style.top = `${rect.top}px`;
+      hostEl.style.cursor = 'grabbing';
+
+      const onMove = (ev: MouseEvent) => {
+        if (!dragRef.current || !hostEl) return;
+        const pos = clampToViewport({
+          left: ev.clientX - dragRef.current.offsetX,
+          top: ev.clientY - dragRef.current.offsetY,
+        }, hostEl);
+        applyHostPosition(hostEl, pos);
+      };
+
+      const onUp = () => {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        if (hostEl) hostEl.style.cursor = '';
+        const r = hostEl?.getBoundingClientRect();
+        if (r && chrome.storage?.local) {
+          const key = `${FLOATER_POS_KEY_PREFIX}${marketplace}`;
+          chrome.storage.local.set({ [key]: { left: r.left, top: r.top } });
+        }
+        dragRef.current = null;
+      };
+
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    },
+    [hostEl, marketplace],
+  );
+}
+
+type ReactPointerLikeEvent = {
+  clientX: number;
+  clientY: number;
+  preventDefault: () => void;
+  stopPropagation: () => void;
+};
+
+function applyHostPosition(host: HTMLElement, pos: FloaterPosition): void {
+  host.style.right = 'auto';
+  host.style.bottom = 'auto';
+  host.style.left = `${pos.left}px`;
+  host.style.top = `${pos.top}px`;
+}
+
+function clampToViewport(
+  pos: FloaterPosition,
+  host?: HTMLElement,
+): FloaterPosition {
+  const w = host?.offsetWidth ?? 200;
+  const h = host?.offsetHeight ?? 48;
+  const maxLeft = Math.max(VIEWPORT_PADDING, window.innerWidth - w - VIEWPORT_PADDING);
+  const maxTop = Math.max(VIEWPORT_PADDING, window.innerHeight - h - VIEWPORT_PADDING);
+  return {
+    left: Math.min(maxLeft, Math.max(VIEWPORT_PADDING, pos.left)),
+    top: Math.min(maxTop, Math.max(VIEWPORT_PADDING, pos.top)),
+  };
 }
 
 function CollapsedPill({
@@ -156,6 +301,7 @@ function CollapsedPill({
   lastChangePct,
   expanded,
   onToggle,
+  onDragStart,
 }: {
   theme: MarketplaceTheme;
   currentPrice: number | null;
@@ -163,12 +309,50 @@ function CollapsedPill({
   lastChangePct: number | null;
   expanded: boolean;
   onToggle: () => void;
+  onDragStart: (e: ReactPointerLikeEvent) => void;
 }) {
   const isDrop = lastChange != null && lastChange < 0;
   const isRise = lastChange != null && lastChange > 0;
   const trendColor = isDrop ? '#059669' : isRise ? '#dc2626' : '#64748b';
 
   return (
+    <div
+      style={{
+        pointerEvents: 'auto',
+        display: 'inline-flex',
+        alignItems: 'stretch',
+        background: '#fff',
+        color: '#0f172a',
+        border: `1px solid ${theme.accent}33`,
+        boxShadow: '0 6px 20px rgba(15,23,42,0.18)',
+        borderRadius: 999,
+        fontSize: 13,
+        fontWeight: 500,
+        fontFamily: 'inherit',
+        overflow: 'hidden',
+      }}
+    >
+      <span
+        role="button"
+        aria-label="Перетащить окно статистики"
+        title="Перетащить"
+        onMouseDown={onDragStart}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '0 8px 0 12px',
+          cursor: 'grab',
+          color: '#94a3b8',
+          // Visual divider between handle and pill body.
+          borderRight: '1px solid #e2e8f0',
+          userSelect: 'none',
+          fontSize: 12,
+          lineHeight: 1,
+        }}
+      >
+        ⋮⋮
+      </span>
     <button
       type="button"
       onClick={onToggle}
@@ -178,11 +362,9 @@ function CollapsedPill({
         display: 'inline-flex',
         alignItems: 'center',
         gap: 8,
-        background: '#fff',
+        background: 'transparent',
         color: '#0f172a',
-        border: `1px solid ${theme.accent}33`,
-        boxShadow: '0 6px 20px rgba(15,23,42,0.18)',
-        borderRadius: 999,
+        border: 'none',
         padding: '8px 14px 8px 10px',
         fontSize: 13,
         fontWeight: 500,
@@ -218,6 +400,7 @@ function CollapsedPill({
         {expanded ? '▾' : '▴'}
       </span>
     </button>
+    </div>
   );
 }
 

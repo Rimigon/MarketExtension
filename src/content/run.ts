@@ -166,12 +166,14 @@ export function runContentScript(parser: Parser, label: string, opts: RunOptions
       return;
     }
 
-    diag('injecting TrackButton', {
-      title: parsed.title,
-      currentPrice: parsed.currentPrice,
-      anchorTag: anchor.tagName,
-      anchorClass: (anchor.className as unknown as string) || '(none)',
-    });
+    // Single-line summary so the user can read the anchor info straight from
+    // the console without expanding the Object — useful when triaging
+    // "button under title vs under price" bugs.
+    const anchorWidget = anchor.getAttribute('data-widget') ?? '(no data-widget)';
+    const anchorClass = (anchor.className as unknown as string) || '(no class)';
+    diag(
+      `injecting TrackButton · anchor=${anchor.tagName} widget=${anchorWidget} class=${anchorClass.slice(0, 80)} price=${parsed.currentPrice}`,
+    );
 
     injecting = true;
     try {

@@ -69,7 +69,9 @@ export function injectTrackButton({ anchor, parsed, initialProduct, onTrackingCh
  */
 export function injectStatsFloater(product: Product): void {
   if (floaterHost && floaterRoot && floaterProductId === product.id) {
-    floaterRoot.render(<StatsFloater product={product} onUntrack={teardownStatsFloater} />);
+    floaterRoot.render(
+      <StatsFloater product={product} hostEl={floaterHost} onUntrack={teardownStatsFloater} />,
+    );
     return;
   }
   teardownStatsFloater();
@@ -94,7 +96,9 @@ export function injectStatsFloater(product: Product): void {
   floaterHost = host;
   floaterProductId = product.id;
   floaterRoot = createRoot(mount);
-  floaterRoot.render(<StatsFloater product={product} onUntrack={teardownStatsFloater} />);
+  floaterRoot.render(
+    <StatsFloater product={product} hostEl={host} onUntrack={teardownStatsFloater} />,
+  );
 }
 
 export function teardownStatsFloater(): void {
