@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { sendRpc } from '@/shared/rpc';
-import { canonicalizeUrl, detectMarketplace } from '@/shared/url';
+import { canonicalizeUrl, canonicalProductUrl, detectMarketplace } from '@/shared/url';
 import {
   formatPrice,
   formatDateTime,
@@ -81,7 +81,7 @@ export function App() {
       if (!mp) {
         setTab({ kind: 'unsupported', reason: 'Эта страница не на поддерживаемом маркетплейсе.' });
       } else {
-        const canonical = canonicalizeUrl(activeTab.url);
+        const canonical = mp ? canonicalProductUrl(mp, activeTab.url) : canonicalizeUrl(activeTab.url);
         const { product } = await sendRpc('product/getByCanonical', { canonicalUrl: canonical });
         if (product) setTab({ kind: 'tracked', product, tabId: activeTab.id, url: activeTab.url });
         else setTab({ kind: 'untracked', tabId: activeTab.id, url: activeTab.url });

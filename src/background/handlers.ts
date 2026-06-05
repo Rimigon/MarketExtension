@@ -49,7 +49,15 @@ export const handlers: RpcHandlerMap = {
   ping: async () => ({ ok: true, ts: Date.now() }),
 
   'product/add': async ({ parsed, source }) => {
-    const existing = await productsRepo.getByCanonicalUrl(parsed.canonicalUrl);
+    let existing = await productsRepo.getByCanonicalUrl(parsed.canonicalUrl);
+    if (!existing && parsed.sku) {
+      const bySku = await db().products.where({ marketplace: parsed.marketplace, sku: parsed.sku }).first();
+      if (bySku) {
+        existing = bySku;
+        // Migrate canonicalUrl so future lookups (and popup state) hit directly.
+        await db().products.update(bySku.id, { canonicalUrl: parsed.canonicalUrl });
+      }
+    }
     const priceSource = source === 'page' ? 'visit' : 'manual';
     // Record a diagnostic for *every* parsed outcome so the health page can show
     // a meaningful ok/partial/failed success rate, not just the failures.

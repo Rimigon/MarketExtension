@@ -5,6 +5,15 @@ const TRACKING_PARAMS = new Set([
   'utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term',
   'sortIdx', 'asb', 'asb2', '_bctx', 'avtc', 'avte', 'avts', 'miniapp',
   'from', 'sh', 'context', 'fromSearch', 'reqId', 'requestId',
+  // Wildberries
+  'targetUrl', 'sort', 'page', 'size', 'color',
+  // Ozon
+  'oos_search', 'tab', 'seller', 'at', 'abt', 'ab',
+  // Yandex Market
+  'sku', 'uniqueId', 'do-waremd5', 'nid', 'show-uid',
+  'clid', 'pp', 'mclid', 'distr_type', 'erid', 'vid',
+  // Common
+  'text',
 ]);
 
 export function detectMarketplace(url: string): Marketplace | null {
@@ -21,8 +30,59 @@ export function detectMarketplace(url: string): Marketplace | null {
 }
 
 /**
+ * Build a stable canonical product URL for deduplication.
+ * Strips slugs, query params, and marketplace-specific noise so that
+ * the same product is always keyed by the same URL regardless of how
+ * the user arrived at the page.
+ */
+export function canonicalProductUrl(marketplace: Marketplace, rawUrl: string): string {
+  try {
+    const u = new URL(rawUrl);
+    const host = u.host.replace(/^www\./, '');
+    const base = `${u.protocol}//${host}`;
+    const pathname = u.pathname;
+
+    switch (marketplace) {
+      case 'ozon': {
+        // /product/<slug>-<id>/ → /product/-<id>/
+        const m = /^\/product\/[^/]*-(\d+)\/?$/i.exec(pathname);
+        if (m && m[1]) {
+          return `${base}/product/-${m[1]}/`;
+        }
+        break;
+      }
+      case 'wildberries': {
+        // /catalog/<id>/detail.aspx → keep path, drop query
+        const m = /^\/catalog\/(\d+)\/detail\.aspx/i.exec(pathname);
+        if (m && m[1]) {
+          return `${base}/catalog/${m[1]}/detail.aspx`;
+        }
+        break;
+      }
+      case 'yandex-market': {
+        // /product--<slug>/<id> | /product/<slug>/<id> | /card/<slug>/<id>
+        // → /product/<id>
+        const m = /^\/(?:card|product)(?:--[^/]+)?(?:\/[^/]+)?\/(\d+)/i.exec(pathname);
+        if (m && m[1]) {
+          return `${base}/product/${m[1]}`;
+        }
+        break;
+      }
+    }
+
+    // Fallback for non-product paths or unrecognized shapes.
+    return canonicalizeUrl(rawUrl);
+  } catch {
+    return rawUrl;
+  }
+}
+
+/**
  * Strip tracking params and normalize host so that the same product page
  * always produces the same canonical URL (used as dedup key).
+ *
+ * Prefer `canonicalProductUrl(marketplace, rawUrl)` for product URLs — it
+ * normalizes slugs and drops marketplace-specific query noise.
  */
 export function canonicalizeUrl(rawUrl: string): string {
   try {

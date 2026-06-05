@@ -4,7 +4,7 @@ import type {
   PriceTier,
   ProductSpec,
 } from '@/shared/types';
-import { canonicalizeUrl } from '@/shared/url';
+import { canonicalProductUrl } from '@/shared/url';
 
 const API_PARSER_VERSION = 3;
 const MAX_DESCRIPTION_CHARS = 5000;
@@ -294,7 +294,7 @@ export async function fetchWbProductFromApi(nm: number, url: URL): Promise<Parse
   return {
     marketplace: 'wildberries',
     url: url.toString(),
-    canonicalUrl: canonicalizeUrl(url.toString()),
+    canonicalUrl: canonicalProductUrl('wildberries', url.toString()),
     sku: String(product.id),
     title: product.name ?? `Товар ${product.id}`,
     brand: product.brand,

@@ -1,5 +1,5 @@
 import type { Availability, ParsedProduct, ParserStatus, PriceTier, ProductSpec } from '@/shared/types';
-import { canonicalizeUrl } from '@/shared/url';
+import { canonicalProductUrl } from '@/shared/url';
 import { findJsonLdProduct, parsePriceText, readJsonLd } from '../base';
 import { OZON_SELECTORS } from './selectors';
 
@@ -486,7 +486,7 @@ export function extractOzonProduct(doc: Document, url: URL): ParsedProduct | nul
   return {
     marketplace: 'ozon',
     url: url.toString(),
-    canonicalUrl: canonicalizeUrl(url.toString()),
+    canonicalUrl: canonicalProductUrl('ozon', url.toString()),
     sku: merged.sku ?? null,
     title: merged.title!,
     brand: merged.brand,

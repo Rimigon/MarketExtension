@@ -5,7 +5,7 @@ import type {
   PriceTier,
   ProductSpec,
 } from '@/shared/types';
-import { canonicalizeUrl } from '@/shared/url';
+import { canonicalProductUrl } from '@/shared/url';
 import { findJsonLdProduct, parsePriceText, readJsonLd } from '../base';
 import { YM_SELECTORS } from './selectors';
 
@@ -482,7 +482,7 @@ export function extractYandexMarketProduct(doc: Document, url: URL): ParsedProdu
   return {
     marketplace: 'yandex-market',
     url: url.toString(),
-    canonicalUrl: canonicalizeUrl(url.toString()),
+    canonicalUrl: canonicalProductUrl('yandex-market', url.toString()),
     sku: merged.sku ?? null,
     title: merged.title!,
     brand: merged.brand,
