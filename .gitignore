@@ -31,3 +31,10 @@ skills-lock.json
 .claude/skills/vitest/
 .claude/skills/playwright-best-practices/
 .claude/settings.local.json
+
+# Локальные дебаг-скрипты и скриншоты (содержат персональные пути)
+scripts/open-yandex.mjs
+scripts/open-yandex2.mjs
+scripts/open-dashboard.mjs
+scripts/inspect-yandex.mjs
+dashboard-inspect.png
